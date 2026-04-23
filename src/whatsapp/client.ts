@@ -115,6 +115,7 @@ async function connect(): Promise<void> {
 
       const jid = msg.key.remoteJid!;
 
+      logger.info(`Incoming LID: ${jid}`);
       if (!config.ALLOWED_JIDS.includes(jid)) continue;
 
       const content = msg.message;
