@@ -3,8 +3,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { parseCaption } from './parseText';
 import { extractAndValidateZip } from './zip';
-import { cleanupDriveFiles, cleanupLocalDir } from './cleanup';
-import { copyTemplate, uploadImage, shareDoc } from '../google/drive';
+import { cleanupLocalDir } from './cleanup';
+import { createFolder, copyTemplate, uploadImage, shareDoc, renameFile } from '../google/drive';
 import { fillDoc } from '../google/docs';
 import { config } from '../config';
 import { logger } from '../logger';
@@ -27,7 +27,6 @@ export interface PipelineError {
 
 export async function runPipeline(input: PipelineInput): Promise<PipelineResult | PipelineError> {
   const tempDir = path.join(os.tmpdir(), `carousel-${input.msgId}`);
-  const uploadedFileIds: string[] = [];
 
   try {
     // ── Parse text ──────────────────────────────────────────────────────────
@@ -61,19 +60,21 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult 
 
     const { files: imageFiles } = extracted;
 
+    // ── Create campaign folder ──────────────────────────────────────────────
+    const campaignFolderId = await createFolder(config.OUTPUT_FOLDER_ID, title);
+
     // ── Upload images to Drive ──────────────────────────────────────────────
     const imageSlots: Array<{ driveFileId: string; publicUrl: string }> = [];
 
     for (const filePath of imageFiles) {
-      const slot = await uploadImage(filePath);
-      uploadedFileIds.push(slot.driveFileId);
+      const slot = await uploadImage(filePath, campaignFolderId);
       imageSlots.push(slot);
     }
 
     // ── Select template and copy ────────────────────────────────────────────
     const usesFb = captionBody.includes(config.TRIGGER_URL);
     const templateId = usesFb ? config.TEMPLATE_ID_IG_FB : config.TEMPLATE_ID_IG;
-    const docId = await copyTemplate(templateId, title);
+    const docId = await copyTemplate(templateId, title, campaignFolderId);
 
     // ── Fill document ───────────────────────────────────────────────────────
     try {
@@ -82,6 +83,10 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult 
       logger.error('fillDoc failed:', err);
       return { ok: false, userMessage: "❌ Couldn't build the doc. I logged it — check the VPS." };
     }
+
+    // ── Rename document ─────────────────────────────────────────────────────
+    const docName = `[APPROVAL | GRAPHICS] ${title}`;
+    await renameFile(docId, docName);
 
     // ── Share ───────────────────────────────────────────────────────────────
     await shareDoc(docId);
@@ -92,7 +97,6 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult 
     logger.error('Pipeline error:', err);
     return { ok: false, userMessage: '❌ Something broke. Check the logs.' };
   } finally {
-    await cleanupDriveFiles(uploadedFileIds);
     cleanupLocalDir(tempDir);
   }
 }

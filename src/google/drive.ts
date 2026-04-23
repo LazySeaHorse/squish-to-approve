@@ -8,7 +8,20 @@ function getDrive() {
   return google.drive({ version: 'v3', auth: getOAuth2Client() });
 }
 
-export async function copyTemplate(templateId: string, title: string): Promise<string> {
+export async function createFolder(parentFolderId: string, folderName: string): Promise<string> {
+  const drive = getDrive();
+  const res = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    },
+    fields: 'id',
+  });
+  return res.data.id!;
+}
+
+export async function copyTemplate(templateId: string, title: string, campaignFolderId: string): Promise<string> {
   const drive = getDrive();
   const truncated = title.slice(0, 80);
   const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -18,14 +31,14 @@ export async function copyTemplate(templateId: string, title: string): Promise<s
     fileId: templateId,
     requestBody: {
       name,
-      parents: [config.OUTPUT_FOLDER_ID],
+      parents: [campaignFolderId],
     },
   });
 
   return res.data.id!;
 }
 
-export async function uploadImage(filePath: string): Promise<{ driveFileId: string; publicUrl: string }> {
+export async function uploadImage(filePath: string, campaignFolderId: string): Promise<{ driveFileId: string; publicUrl: string }> {
   const drive = getDrive();
   const name = path.basename(filePath);
   const mimeType = filePath.match(/\.png$/i) ? 'image/png' : 'image/jpeg';
@@ -33,7 +46,7 @@ export async function uploadImage(filePath: string): Promise<{ driveFileId: stri
   const res = await drive.files.create({
     requestBody: {
       name,
-      parents: [config.TEMP_IMAGE_FOLDER_ID],
+      parents: [campaignFolderId],
     },
     media: {
       mimeType,
@@ -53,6 +66,14 @@ export async function uploadImage(filePath: string): Promise<{ driveFileId: stri
     driveFileId,
     publicUrl: `https://drive.google.com/uc?id=${driveFileId}`,
   };
+}
+
+export async function renameFile(fileId: string, newName: string): Promise<void> {
+  const drive = getDrive();
+  await drive.files.update({
+    fileId,
+    requestBody: { name: newName },
+  });
 }
 
 export async function deleteFile(fileId: string): Promise<void> {

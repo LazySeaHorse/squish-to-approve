@@ -43,6 +43,12 @@ export async function fillDoc(
             replaceText: hashtags.join(' '),
           },
         },
+        {
+          replaceAllText: {
+            containsText: { text: '{{NUMBER_OF_POSTS}}', matchCase: true },
+            replaceText: String(images.length),
+          },
+        },
       ],
     },
   });
@@ -152,7 +158,8 @@ function findInParagraph(
 
 // Finds the range of the smallest deletable block containing the placeholder.
 // Strategy: find the paragraph (or table row) that contains the placeholder and
-// return its full range including the trailing newline character.
+// return its range excluding the trailing newline (endIndex - 1).
+// Google Docs API rejects deleteContentRange operations that include the trailing newline.
 function findBlockRange(
   body: docs_v1.Schema$Body,
   text: string,
@@ -164,7 +171,7 @@ function findBlockRange(
     if (element.paragraph) {
       const found = findInParagraph(element, text);
       if (found && element.startIndex != null && element.endIndex != null) {
-        return { start: element.startIndex, end: element.endIndex };
+        return { start: element.startIndex, end: element.endIndex - 1 };
       }
     }
 
@@ -180,7 +187,7 @@ function findBlockRange(
           }
         }
         if (rowContainsPlaceholder && row.startIndex != null && row.endIndex != null) {
-          return { start: row.startIndex, end: row.endIndex };
+          return { start: row.startIndex, end: row.endIndex - 1 };
         }
       }
     }
