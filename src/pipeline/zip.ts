@@ -21,7 +21,7 @@ export function extractAndValidateZip(
   const zip = new AdmZip(zipPath);
   const entries = zip
     .getEntries()
-    .filter(e => !e.isDirectory && IMAGE_EXTS.has(path.extname(e.name).toLowerCase()));
+    .filter(e => !e.isDirectory && !e.entryName.includes('/') && IMAGE_EXTS.has(path.extname(e.name).toLowerCase()));
 
   if (entries.length === 0) {
     return { kind: 'empty', message: 'The zip is empty.' };

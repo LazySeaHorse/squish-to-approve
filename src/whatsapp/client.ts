@@ -155,6 +155,7 @@ async function connect(): Promise<void> {
 }
 
 async function processZipMsg(jid: string, msg: WAMessage, captionText: string): Promise<void> {
+  await sendText(jid, '⏳ Got both. Building the doc...');
   let zipBuffer: Buffer;
   try {
     zipBuffer = (await downloadMediaMessage(msg, 'buffer', {})) as Buffer;

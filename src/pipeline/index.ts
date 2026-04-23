@@ -51,8 +51,6 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult 
           return { ok: false, userMessage: '⚠️ The zip is empty.' };
         case 'too_many':
           return { ok: false, userMessage: '⚠️ Max 10 images per carousel.' };
-        case 'non_image_files':
-          return { ok: false, userMessage: '⚠️ The zip has non-image files. Images only (JPG/PNG).' };
         case 'wrong_naming':
         case 'missing_numbers':
           return { ok: false, userMessage: '⚠️ Images should be named 1.jpg, 2.jpg, etc.' };

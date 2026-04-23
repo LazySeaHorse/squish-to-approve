@@ -64,7 +64,7 @@ No published SQLite auth-state npm package was available at time of writing. We 
 
 The user might send a zip and then type the caption seconds later. An earlier design downloaded the zip eagerly (before the caption arrived) and stored the `Buffer`. This introduced a race: if the caption arrived before the download finished, `processWithBuffers` would get an empty buffer. The fix was to store the raw `WAMessage` object and download only when both halves are paired — at that point we have the full message metadata needed for `downloadMediaMessage`.
 
-The pairing buffer lives in `client.ts` as an in-memory `Map<jid, Pending>`. A 2-minute `setTimeout` per entry expires unpaired halves.
+The pairing buffer lives in `client.ts` as an in-memory `Map<jid, Pending>`. A 2-minute `setTimeout` per entry expires unpaired halves. When both halves pair, the bot immediately sends "⏳ Got both. Building the doc..." before starting the pipeline.
 
 ### Why browser string is `Browsers.ubuntu('Chrome')` and not `macOS('Desktop')`
 
@@ -133,12 +133,13 @@ Edge case: if there is no `\n` in the input, the entire text is treated as the t
 
 ## Zip validation rules (`src/pipeline/zip.ts`)
 
-Checked in order, first failure wins:
+Before validation, entries are filtered to only root-level image files (`.jpg`/`.jpeg`/`.png` with no `/` in `entryName`). This silently drops macOS junk (`__MACOSX/`, `._` resource forks, `.DS_Store`), subdirectories, and any non-image files.
+
+Validation runs on the filtered set, first failure wins:
 1. Zero entries → `empty`
 2. > 10 entries → `too_many`
-3. Any non-image extension → `non_image_files`
-4. Any filename not matching `/^0*(\d+)\.(jpg|jpeg|png)$/i` → `wrong_naming`
-5. Numeric parts are not consecutive starting at 1 → `missing_numbers`
+3. Any filename not matching `/^0*(\d+)\.(jpg|jpeg|png)$/i` → `wrong_naming`
+4. Numeric parts are not consecutive starting at 1 → `missing_numbers`
 
 On success, returns `files[]` sorted by numeric index. The numeric sort is important — filesystem order from the zip is not guaranteed.
 
