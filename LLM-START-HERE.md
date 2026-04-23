@@ -15,10 +15,19 @@ Single-user WhatsApp bot. The operator forwards a `.zip` of carousel images + a 
 ```
 WhatsApp message
   → client.ts       detect zip / caption, pair them if split across messages
-  → pipeline/       download zip, validate, parse text, upload images, copy+fill doc
-  → Google Drive    copyTemplate → uploadImage × N → deleteImage × N (cleanup)
-  → Google Docs     batchUpdate (text) + sequential batchUpdate × 10 (images)
-  → WhatsApp reply  URL or error message
+  → pipeline/       download zip, validate, parse text, create campaign folder
+  → Google Drive    createFolder(title) → uploadImage × N → copyTemplate
+  → Google Docs     batchUpdate (text + NUMBER_OF_POSTS) + sequential batchUpdate × 10 (images)
+  → Google Drive    renameFile → doc becomes "[APPROVAL | GRAPHICS] {title}"
+  → WhatsApp reply  doc URL + campaign folder URL, or error message
+```
+
+Output structure:
+```
+OUTPUT_FOLDER_ID/
+  {campaign_title}/
+    [APPROVAL | GRAPHICS] {title} (Google Doc)
+    1.jpg, 2.jpg, … (images)
 ```
 
 ---
@@ -69,11 +78,11 @@ The Google Docs API works on character indices. When you delete or insert conten
 
 ### Why two template IDs instead of one
 
-The IG-only vs IG+Facebook distinction is a "Platform" smart-chip dropdown in Google Docs — it cannot be set via the Docs API (smart chips are not exposed as `batchUpdate` operations). The only way to pre-set it is to have two separate template documents with the field already filled. Template selection is driven by `captionBody.includes(TRIGGER_URL)`.
+The IG-only vs IG+Facebook distinction is a "Platform" smart-chip dropdown in Google Docs — it cannot be set via the Docs API (smart chips are not exposed as `batchUpdate` operations). The only way to pre-set it is to have two separate template documents with the field already filled. Template selection is driven by `captionBody.includes(TRIGGER_URL)`: URL found → IG-only template (`TEMPLATE_ID_IG`); URL absent → IG+FB template (`TEMPLATE_ID_IG_FB`).
 
 ### Why we upload images to Drive before inserting them into Docs
 
-The Docs API `insertInlineImage` takes a URI, not raw bytes. The URI must be publicly readable when the Docs API fetches it. We upload each image to `TEMP_IMAGE_FOLDER_ID`, set `{ role: reader, type: anyone }` permission, and pass `https://drive.google.com/uc?id=<id>`. These files are deleted in the `finally` block.
+The Docs API `insertInlineImage` takes a URI, not raw bytes. The URI must be publicly readable when the Docs API fetches it. We upload each image to the campaign folder, set `{ role: reader, type: anyone }` permission, and pass `https://drive.google.com/uc?id=<id>`. These files are kept permanently (not deleted) so they remain accessible in the campaign folder alongside the filled doc.
 
 > **Open item:** if the Docs API rejects `drive.google.com/uc?id=` links (this has varied across API versions), try the `webContentLink` from the Drive upload response instead. Verify empirically.
 
@@ -83,10 +92,11 @@ The Docs API `insertInlineImage` takes a URI, not raw bytes. The URI must be pub
 
 `fillDoc(docId, title, captionBody, hashtags, images[])` runs in two phases:
 
-**Phase A — text (one batchUpdate, three replaceAllText):**
+**Phase A — text (one batchUpdate, four replaceAllText):**
 - `{{TITLE}}` → title
 - `{{CAPTION}}` → captionBody
 - `{{HASHTAGS}}` → hashtags joined by spaces
+- `{{NUMBER_OF_POSTS}}` → number of images in the carousel
 
 **Phase B — images (loop from slot 10 down to 1):**
 
@@ -140,13 +150,12 @@ All required. Parsed in `src/config.ts`. See `.env.example` for the full list wi
 
 | Variable | Purpose |
 |---|---|
-| `ALLOWED_JIDS` | Comma-separated. Only messages from these JIDs are processed. Set to your own number. |
+| `ALLOWED_JIDS` | Comma-separated. Only messages from these JIDs are processed. Format: `{phone}@s.whatsapp.net` or `{phone}@lid` (for linked devices). |
 | `BAILEYS_DB_PATH` | Path to the SQLite auth database. Default: `./data/baileys.db`. |
 | `GOOGLE_CLIENT_ID / SECRET / REFRESH_TOKEN` | OAuth2 credentials. Refresh token obtained via `npm run auth:google`. |
-| `TEMPLATE_ID_IG / TEMPLATE_ID_IG_FB` | Google Doc IDs of the two templates. |
-| `OUTPUT_FOLDER_ID` | Drive folder where filled approval docs are saved. |
-| `TEMP_IMAGE_FOLDER_ID` | Drive folder for transient image uploads (deleted after each run). |
-| `TRIGGER_URL` | Substring in caption body that selects the IG+FB template. |
+| `TEMPLATE_ID_IG / TEMPLATE_ID_IG_FB` | Google Doc IDs of the two templates. Both must have `{{TITLE}}`, `{{CAPTION}}`, `{{HASHTAGS}}`, `{{NUMBER_OF_POSTS}}`, and `{{IMAGE_1}}` through `{{IMAGE_10}}` placeholders. |
+| `OUTPUT_FOLDER_ID` | Drive folder where campaign folders are created. Each campaign folder contains the filled doc and all images. |
+| `TRIGGER_URL` | Substring in caption body that selects the IG-only template (absence selects IG+FB). |
 | `OUTPUT_DOC_PERMISSION` | `reader` or `writer` — the permission set on the output doc. |
 | `PAIRING_TIMEOUT_MS` | How long to wait for the other half of a split zip+caption. Default: 120000. |
 
@@ -174,8 +183,9 @@ pm2 logs approve-to-squish   # watch for QR code on first run
 
 ## What to watch out for when making changes
 
-- **`docs.ts` Phase B:** any change to how indices are calculated must account for the re-fetch loop. Do not try to batch all 10 slots into one update without careful offset tracking.
+- **`docs.ts` Phase B:** any change to how indices are calculated must account for the re-fetch loop. Do not try to batch all 10 slots into one update without careful offset tracking. Also: `deleteContentRange` operations cannot include the paragraph's trailing newline — `findBlockRange` subtracts 1 from `endIndex` to account for this.
+- **`docs.ts` deleteContentRange:** Google Docs API rejects ranges that include the final newline character at the end of a paragraph or table row. Always subtract 1 from `endIndex` when deleting a full block.
 - **`sqliteAuthState.ts`:** `saveCreds` is synchronous (better-sqlite3). Baileys expects it to return `void | Promise<void>`. Returning `void` is fine. Do not make it async without testing — async `saveCreds` with better-sqlite3 will not work.
-- **`client.ts` pairing buffer:** the buffer is keyed by JID (sender), not message ID. One JID can only have one pending half at a time. Sending a second zip before the first is paired will replace the pending zip entry (the timer is reset).
-- **Template placeholders:** `{{IMAGE_1}}` through `{{IMAGE_10}}` must be in the template as literal text, each in its own cleanly deletable block. If any placeholder is missing, `fillDoc` logs a warning and skips it — it will not throw. Missing image in the output doc is a template setup issue, not a code bug.
+- **`client.ts` pairing buffer:** the buffer is keyed by JID (sender), not message ID. One JID can only have one pending half at a time. Sending a second zip before the first is paired will replace the pending zip entry (the timer is reset). For linked device connections, incoming JIDs use the `@lid` suffix, not `@s.whatsapp.net`.
+- **Template placeholders:** `{{IMAGE_1}}` through `{{IMAGE_10}}`, `{{TITLE}}`, `{{CAPTION}}`, `{{HASHTAGS}}`, and `{{NUMBER_OF_POSTS}}` must be in the template as literal text. Image placeholders must each be in their own cleanly deletable block. If any placeholder is missing, `fillDoc` logs a warning and skips it — it will not throw. Missing image in the output doc is a template setup issue, not a code bug.
 - **Google API quotas:** `documents.get` is called once per slot in Phase B (up to 10 calls per run). At low volume this is fine. If throughput ever matters, switch to a single `documents.get` + batched updates with manually adjusted indices.

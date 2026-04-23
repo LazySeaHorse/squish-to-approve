@@ -166,7 +166,7 @@ async function processZipMsg(jid: string, msg: WAMessage, captionText: string): 
   const msgId = msg.key.id!;
   logger.info(`Processing carousel for ${jid} (msg ${msgId})`);
   const result = await runPipeline({ msgId, zipBuffer, captionText });
-  await sendText(jid, result.ok ? `✅ Approval doc ready: ${result.url}` : result.userMessage);
+  await sendText(jid, result.ok ? `✅ Approval doc ready: ${result.url}\n\n📁 Campaign folder: ${result.folderUrl}` : result.userMessage);
 }
 
 export { connect };

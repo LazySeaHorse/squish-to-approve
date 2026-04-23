@@ -18,6 +18,7 @@ export interface PipelineInput {
 export interface PipelineResult {
   ok: true;
   url: string;
+  folderUrl: string;
 }
 
 export interface PipelineError {
@@ -72,8 +73,8 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult 
     }
 
     // ── Select template and copy ────────────────────────────────────────────
-    const usesFb = captionBody.includes(config.TRIGGER_URL);
-    const templateId = usesFb ? config.TEMPLATE_ID_IG_FB : config.TEMPLATE_ID_IG;
+    const igOnly = captionBody.includes(config.TRIGGER_URL);
+    const templateId = igOnly ? config.TEMPLATE_ID_IG : config.TEMPLATE_ID_IG_FB;
     const docId = await copyTemplate(templateId, title, campaignFolderId);
 
     // ── Fill document ───────────────────────────────────────────────────────
@@ -91,8 +92,9 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult 
     // ── Share ───────────────────────────────────────────────────────────────
     await shareDoc(docId);
     const url = `https://docs.google.com/document/d/${docId}/edit`;
+    const folderUrl = `https://drive.google.com/drive/folders/${campaignFolderId}`;
 
-    return { ok: true, url };
+    return { ok: true, url, folderUrl };
   } catch (err) {
     logger.error('Pipeline error:', err);
     return { ok: false, userMessage: '❌ Something broke. Check the logs.' };
