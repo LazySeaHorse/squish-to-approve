@@ -6,12 +6,17 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import type { WASocket, WAMessage } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
+import * as fs from 'fs';
+import * as path from 'path';
 import AdmZip from 'adm-zip';
 import { useSqliteAuthState } from './sqliteAuthState';
 import { runPipeline } from '../pipeline';
 import { parseCaption } from '../pipeline/parseText';
 import { config } from '../config';
 import { logger } from '../logger';
+
+/** Directory for spooling zip files to disk while a batch is being built. */
+const BATCH_SPOOL_DIR = path.join('data', 'batch-spool');
 
 let sock: WASocket | null = null;
 
@@ -29,7 +34,8 @@ async function sendText(jid: string, text: string): Promise<void> {
 /** A fully paired job ready for processing. */
 interface QueuedJob {
   zipMsg: WAMessage;
-  zipBuffer: Buffer;
+  /** Path to the zip file on disk (in BATCH_SPOOL_DIR). */
+  zipPath: string;
   captionText: string;
   /** Pre-parsed title for the /go preview. */
   previewTitle: string;
@@ -117,6 +123,17 @@ function clearPendingBuffers(jid: string): void {
   for (const item of s.pendingCaptions) clearTimeout(item.timer);
   s.pendingZips.length = 0;
   s.pendingCaptions.length = 0;
+}
+
+/** Delete all spooled zip files for jobs in the given array. */
+function cleanupSpooledZips(jobs: QueuedJob[]): void {
+  for (const job of jobs) {
+    try {
+      fs.unlinkSync(job.zipPath);
+    } catch {
+      // Already deleted or never written — fine.
+    }
+  }
 }
 
 // ── Image counting (without extracting) ───────────────────────────────────────
@@ -234,6 +251,7 @@ async function handleCommand(jid: string, command: string): Promise<void> {
         return;
       }
       clearPendingBuffers(jid);
+      cleanupSpooledZips(s.readyJobs);
       s.readyJobs.length = 0;
       s.mode = s.mode === 'single' ? 'single' : 'batch-idle';
       await sendText(jid, '🗑 Cleared. All queued pairs and pending halves have been dropped.');
@@ -259,8 +277,18 @@ async function processBatch(jid: string): Promise<void> {
     const label = `[${i + 1}/${jobs.length}] ${job.previewTitle}`;
     logger.info(`Batch ${label}: starting`);
 
+    // Read the zip from disk — only one buffer in memory at a time
+    let zipBuffer: Buffer;
+    try {
+      zipBuffer = fs.readFileSync(job.zipPath);
+    } catch (err) {
+      logger.error(`Failed to read spooled zip ${job.zipPath}:`, err);
+      await sendText(jid, `❌ ${label}\nFailed to read the zip from disk.`);
+      continue;
+    }
+
     const msgId = job.zipMsg.key.id!;
-    const result = await runPipeline({ msgId, zipBuffer: job.zipBuffer, captionText: job.captionText });
+    const result = await runPipeline({ msgId, zipBuffer, captionText: job.captionText });
 
     if (result.ok) {
       await sendText(jid, `✅ ${label}\n${result.docName}\n\n${result.url}\n\n📁 ${result.folderUrl}`);
@@ -268,6 +296,9 @@ async function processBatch(jid: string): Promise<void> {
       await sendText(jid, `❌ ${label}\n${result.userMessage}`);
     }
   }
+
+  // Clean up all spooled zip files
+  cleanupSpooledZips(jobs);
 
   s.mode = 'batch-idle';
   await sendText(jid, `✅ Batch complete. ${jobs.length} pair${jobs.length !== 1 ? 's' : ''} processed.`);
@@ -291,7 +322,15 @@ async function onPairCompleted(jid: string, zipMsg: WAMessage, captionText: stri
 
   const { title } = parseCaption(captionText);
   const zipFileName = zipMsg.message?.documentMessage?.fileName ?? 'unknown.zip';
-  const imageCount = countImagesInZip(zipBuffer);
+
+  let imageCount: number;
+  try {
+    imageCount = countImagesInZip(zipBuffer);
+  } catch (err) {
+    logger.error('Failed to read zip (corrupt?):', err);
+    await sendText(jid, '❌ That zip file appears to be corrupt. Try re-zipping and sending again.');
+    return;
+  }
 
   if (s.mode === 'single') {
     // Process immediately (existing behaviour)
@@ -301,10 +340,14 @@ async function onPairCompleted(jid: string, zipMsg: WAMessage, captionText: stri
     const result = await runPipeline({ msgId, zipBuffer, captionText });
     await sendText(jid, result.ok ? `✅ ${result.docName}\n\n${result.url}\n\n📁 Campaign folder: ${result.folderUrl}` : result.userMessage);
   } else {
-    // Batch mode — enqueue
+    // Batch mode — spool zip to disk so we don't hold all buffers in RAM
+    fs.mkdirSync(BATCH_SPOOL_DIR, { recursive: true });
+    const spoolPath = path.join(BATCH_SPOOL_DIR, `${zipMsg.key.id!}.zip`);
+    fs.writeFileSync(spoolPath, zipBuffer);
+
     s.readyJobs.push({
       zipMsg,
-      zipBuffer,
+      zipPath: spoolPath,
       captionText,
       previewTitle: title || '(untitled)',
       zipFileName,
