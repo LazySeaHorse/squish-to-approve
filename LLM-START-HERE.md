@@ -75,7 +75,9 @@ The bot has two operating modes controlled by user commands:
 
 The state machine per JID has four states: `single`, `batch-idle`, `batch-confirming` (after `/go`, waiting for `/ok` or `/cancel`), and `processing`. During `processing`, new content and mode-switching commands are blocked. `/cancel` clears both the pairing buffer and the ready queue but cannot interrupt an active processing run.
 
-Batch processing is sequential (`for` loop with `await`) — the VPS has 512 MB RAM and 1 vCPU, so concurrent pipelines would exhaust resources.
+**Disk spooling:** To keep RAM usage low (512 MB VPS), zips in batch mode are saved to `data/batch-spool/` immediately after pairing. `readyJobs` stores the file path, not the buffer. Only one zip is loaded into RAM at a time during processing. Files are cleaned up after the batch completes or on `/cancel`.
+
+Batch processing is sequential (`for` loop with `await`) — the VPS has 1 vCPU, so concurrent pipelines would exhaust resources.
 
 Full command list: `/help`, `/batch`, `/single`, `/go`, `/ok`, `/cancel`.
 
@@ -202,5 +204,7 @@ pm2 logs approve-to-squish   # watch for QR code on first run
 - **`sqliteAuthState.ts`:** `saveCreds` is synchronous (better-sqlite3). Baileys expects it to return `void | Promise<void>`. Returning `void` is fine. Do not make it async without testing — async `saveCreds` with better-sqlite3 will not work.
 - **`client.ts` pairing buffer:** uses dual FIFO queues per JID (`pendingZips[]`, `pendingCaptions[]`). Multiple pairs can be in-flight simultaneously. Each queue item has its own expiry timer. For linked device connections, incoming JIDs use the `@lid` suffix, not `@s.whatsapp.net`.
 - **`client.ts` state machine:** the four states (`single`, `batch-idle`, `batch-confirming`, `processing`) must always transition correctly. Commands that change mode (`/batch`, `/single`) are blocked during `batch-confirming` and `processing`. `/cancel` resets to `batch-idle` (or stays `single`), never to `processing`.
+- **`client.ts` spooling:** batch zips are spooled to `data/batch-spool/`. If the process crashes, these files might leak. They are gitignored. Always use `cleanupSpooledZips` to avoid disk bloat.
+- **`client.ts` zip handling:** `countImagesInZip` (AdmZip) is wrapped in try/catch to handle corrupt files. Always validate before enqueuing or processing.
 - **Template placeholders:** `{{IMAGE_1}}` through `{{IMAGE_10}}`, `{{TITLE}}`, `{{CAPTION}}`, `{{HASHTAGS}}`, and `{{NUMBER_OF_POSTS}}` must be in the template as literal text. Image placeholders must each be in their own cleanly deletable block. If any placeholder is missing, `fillDoc` logs a warning and skips it — it will not throw. Missing image in the output doc is a template setup issue, not a code bug.
 - **Google API quotas:** `documents.get` is called once per slot in Phase B (up to 10 calls per run). At low volume this is fine. If throughput ever matters, switch to a single `documents.get` + batched updates with manually adjusted indices.
