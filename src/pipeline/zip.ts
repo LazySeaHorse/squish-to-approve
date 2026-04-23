@@ -6,12 +6,7 @@ const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png']);
 const MAX_IMAGES = 10;
 
 export interface ZipValidationError {
-  kind:
-    | 'non_image_files'
-    | 'wrong_naming'
-    | 'too_many'
-    | 'empty'
-    | 'missing_numbers';
+  kind: 'wrong_naming' | 'too_many' | 'empty' | 'missing_numbers';
   message: string;
 }
 
@@ -24,7 +19,9 @@ export function extractAndValidateZip(
   destDir: string,
 ): ExtractedImages | ZipValidationError {
   const zip = new AdmZip(zipPath);
-  const entries = zip.getEntries().filter(e => !e.isDirectory);
+  const entries = zip
+    .getEntries()
+    .filter(e => !e.isDirectory && IMAGE_EXTS.has(path.extname(e.name).toLowerCase()));
 
   if (entries.length === 0) {
     return { kind: 'empty', message: 'The zip is empty.' };
@@ -32,15 +29,6 @@ export function extractAndValidateZip(
 
   if (entries.length > MAX_IMAGES) {
     return { kind: 'too_many', message: `${entries.length} images found; max is ${MAX_IMAGES}.` };
-  }
-
-  // Validate extensions
-  const nonImage = entries.filter(e => !IMAGE_EXTS.has(path.extname(e.name).toLowerCase()));
-  if (nonImage.length > 0) {
-    return {
-      kind: 'non_image_files',
-      message: `Non-image files: ${nonImage.map(e => e.name).join(', ')}`,
-    };
   }
 
   // Validate naming: must match /^\d+\.(jpg|jpeg|png)$/i
