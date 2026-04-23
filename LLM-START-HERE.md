@@ -57,6 +57,12 @@ The user might send a zip and then type the caption seconds later. An earlier de
 
 The pairing buffer lives in `client.ts` as an in-memory `Map<jid, Pending>`. A 2-minute `setTimeout` per entry expires unpaired halves.
 
+### Why browser string is `Browsers.ubuntu('Chrome')` and not `macOS('Desktop')`
+
+WhatsApp's servers reject pairing code requests from unrecognized client fingerprints. `Browsers.macOS('Desktop')` produces a vague tuple that WhatsApp flags as suspicious. The fix is `Browsers.ubuntu('Chrome')`, which generates a Chrome-like user agent that WhatsApp accepts for phone-number authentication. This is Baileys' documented approach for pairing codes.
+
+Also: the `requestPairingCode` call must happen in the `connection.update` event handler when the `qr` signal fires — not immediately after socket creation. The `qr` event indicates the WebSocket handshake with WhatsApp's servers is complete and they're ready for authentication. Calling too early (before WS is ready) fails with 428 Precondition Required.
+
 ### Why image slots are processed 10 → 1 (reverse order) sequentially with re-fetch
 
 The Google Docs API works on character indices. When you delete or insert content, all indices after that point shift. Processing image slots from 10 down to 1 would preserve earlier indices if we processed them in one batched update — *but* the delete-block and insert-image operations in Phase B change document length unpredictably (images have variable sizes). Rather than track shifting offsets manually, we re-fetch `documents.get` before each slot. It costs ~10 extra API calls but is bulletproof. This was an explicit tradeoff in the original spec: "Start with sequential; optimize only if it's too slow."

@@ -1,6 +1,8 @@
 import makeWASocket, {
   DisconnectReason,
   downloadMediaMessage,
+  fetchLatestBaileysVersion,
+  Browsers,
 } from '@whiskeysockets/baileys';
 import type { WASocket, WAMessage } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
@@ -21,9 +23,8 @@ async function sendText(jid: string, text: string): Promise<void> {
 }
 
 // ── Pairing buffer ────────────────────────────────────────────────────────────
-// Holds a partial zip+caption pair while waiting for the other half.
 interface Pending {
-  zipMsg?: WAMessage;  // the raw Baileys message (for download at pair-time)
+  zipMsg?: WAMessage;
   captionText?: string;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -40,7 +41,6 @@ function scheduleExpiry(jid: string): ReturnType<typeof setTimeout> {
 function storeZip(jid: string, msg: WAMessage): string | null {
   const entry = pending.get(jid);
   if (entry?.captionText != null) {
-    // Caption already waiting — pair now
     clearTimeout(entry.timer);
     pending.delete(jid);
     return entry.captionText;
@@ -53,7 +53,6 @@ function storeZip(jid: string, msg: WAMessage): string | null {
 function storeCaption(jid: string, captionText: string): WAMessage | null {
   const entry = pending.get(jid);
   if (entry?.zipMsg != null) {
-    // Zip already waiting — pair now
     clearTimeout(entry.timer);
     const zipMsg = entry.zipMsg;
     pending.delete(jid);
@@ -68,15 +67,35 @@ function storeCaption(jid: string, captionText: string): WAMessage | null {
 async function connect(): Promise<void> {
   const { state, saveCreds } = useSqliteAuthState(config.BAILEYS_DB_PATH);
 
+  const { version, isLatest } = await fetchLatestBaileysVersion();
+  logger.info(`Connecting with WA v${version.join('.')} (isLatest: ${isLatest})`);
+
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  sock = makeWASocket({ auth: state, logger: require('pino')({ level: 'silent' }) });
+  sock = makeWASocket({
+    version,
+    auth: state,
+    browser: Browsers.ubuntu('Chrome'),
+    syncFullHistory: false,
+    logger: require('pino')({ level: 'silent' }),
+  });
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', update => {
+  let pairingCodeRequested = false;
+
+  sock.ev.on('connection.update', async update => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr) logger.info('QR code — scan with WhatsApp:\n' + qr);
+    if (qr && !pairingCodeRequested && !state.creds.registered) {
+      pairingCodeRequested = true;
+      const phoneNumber = config.ALLOWED_JIDS[0].replace(/[^0-9]/g, '');
+      try {
+        const code = await sock!.requestPairingCode(phoneNumber);
+        logger.info(`\n\n  WhatsApp pairing code: ${code}\n\n  Open WhatsApp → Linked Devices → Link with phone number\n`);
+      } catch (err) {
+        logger.warn('Pairing code request failed:', err);
+      }
+    }
 
     if (connection === 'open') logger.info('WhatsApp connected ✓');
 
@@ -112,11 +131,9 @@ async function connect(): Promise<void> {
         const caption = docMsg.caption?.trim() ?? '';
 
         if (caption) {
-          // Zip + caption together
           logger.info(`zip+caption from ${jid}`);
           processZipMsg(jid, msg, caption);
         } else {
-          // Zip only — wait for caption
           const pairedCaption = storeZip(jid, msg);
           if (pairedCaption != null) {
             processZipMsg(jid, msg, pairedCaption);
@@ -125,7 +142,6 @@ async function connect(): Promise<void> {
           }
         }
       } else if (textMsg) {
-        // Text only — might be caption pairing with a pending zip
         const pairedZipMsg = storeCaption(jid, textMsg);
         if (pairedZipMsg != null) {
           processZipMsg(jid, pairedZipMsg, textMsg);
