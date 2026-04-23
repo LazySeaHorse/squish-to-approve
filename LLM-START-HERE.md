@@ -39,7 +39,7 @@ OUTPUT_FOLDER_ID/
 | `src/index.ts` | Entrypoint. Calls `connect()`, attaches unhandled-rejection logger. |
 | `src/config.ts` | Parses and validates all env vars with Zod. Process exits immediately on misconfiguration. Single import for all config across the app. |
 | `src/logger.ts` | Thin wrapper around `console.log/warn/error` with ISO timestamps. |
-| `src/whatsapp/client.ts` | Entire WhatsApp layer: Baileys socket setup, reconnect logic, JID whitelist, message routing, pairing buffer. See "Pairing buffer" section below. |
+| `src/whatsapp/client.ts` | Entire WhatsApp layer: Baileys socket setup, reconnect logic, JID whitelist, message routing, pairing buffer, command handling (`/help`, `/batch`, `/single`, `/go`, `/ok`, `/cancel`), and batch processing queue. See "Pairing buffer", "Batch mode", and "Commands" sections below. |
 | `src/whatsapp/sqliteAuthState.ts` | Baileys auth state backed by SQLite instead of files. See "SQLite auth state" section below. |
 | `src/pipeline/index.ts` | Orchestrates the full pipeline for one request. The only place that knows the end-to-end order of operations. Image uploads run in parallel via `Promise.all`. Returns `{ ok: true, url }` or `{ ok: false, userMessage }`. |
 | `src/pipeline/parseText.ts` | Pure function. Splits raw caption string into `{ title, captionBody, hashtags[] }`. No side effects. |
@@ -64,7 +64,20 @@ No published SQLite auth-state npm package was available at time of writing. We 
 
 The user might send a zip and then type the caption seconds later. An earlier design downloaded the zip eagerly (before the caption arrived) and stored the `Buffer`. This introduced a race: if the caption arrived before the download finished, `processWithBuffers` would get an empty buffer. The fix was to store the raw `WAMessage` object and download only when both halves are paired — at that point we have the full message metadata needed for `downloadMediaMessage`.
 
-The pairing buffer lives in `client.ts` as an in-memory `Map<jid, Pending>`. A 2-minute `setTimeout` per entry expires unpaired halves. When both halves pair, the bot immediately sends "⏳ Got both. Building the doc..." before starting the pipeline.
+The pairing buffer uses dual FIFO queues per JID (`pendingZips[]` and `pendingCaptions[]`) instead of a single slot. This correctly handles multiple pairs sent in any interleaving order. Each queue item has its own `setTimeout` for expiry. When a pair completes, the zip is downloaded immediately (needed for both modes — single mode processes right away; batch mode needs the buffer to count images for the `/go` preview).
+
+### Batch mode and commands
+
+The bot has two operating modes controlled by user commands:
+
+- **Single mode** (default): each completed pair is processed immediately — identical to the original behaviour.
+- **Batch mode** (`/batch`): completed pairs are queued in `readyJobs[]`. The user sends `/go` to see a preview (title + zip filename + image count per pair), then `/ok` to process sequentially, or `/cancel` to abort.
+
+The state machine per JID has four states: `single`, `batch-idle`, `batch-confirming` (after `/go`, waiting for `/ok` or `/cancel`), and `processing`. During `processing`, new content and mode-switching commands are blocked. `/cancel` clears both the pairing buffer and the ready queue but cannot interrupt an active processing run.
+
+Batch processing is sequential (`for` loop with `await`) — the VPS has 512 MB RAM and 1 vCPU, so concurrent pipelines would exhaust resources.
+
+Full command list: `/help`, `/batch`, `/single`, `/go`, `/ok`, `/cancel`.
 
 ### Why browser string is `Browsers.ubuntu('Chrome')` and not `macOS('Desktop')`
 
@@ -187,6 +200,7 @@ pm2 logs approve-to-squish   # watch for QR code on first run
 - **`docs.ts` Phase B:** any change to how indices are calculated must account for the re-fetch loop. Do not try to batch all 10 slots into one update without careful offset tracking. Also: `deleteContentRange` operations cannot include the paragraph's trailing newline — `findBlockRange` subtracts 1 from `endIndex` to account for this.
 - **`docs.ts` deleteContentRange:** Google Docs API rejects ranges that include the final newline character at the end of a paragraph or table row. Always subtract 1 from `endIndex` when deleting a full block.
 - **`sqliteAuthState.ts`:** `saveCreds` is synchronous (better-sqlite3). Baileys expects it to return `void | Promise<void>`. Returning `void` is fine. Do not make it async without testing — async `saveCreds` with better-sqlite3 will not work.
-- **`client.ts` pairing buffer:** the buffer is keyed by JID (sender), not message ID. One JID can only have one pending half at a time. Sending a second zip before the first is paired will replace the pending zip entry (the timer is reset). For linked device connections, incoming JIDs use the `@lid` suffix, not `@s.whatsapp.net`.
+- **`client.ts` pairing buffer:** uses dual FIFO queues per JID (`pendingZips[]`, `pendingCaptions[]`). Multiple pairs can be in-flight simultaneously. Each queue item has its own expiry timer. For linked device connections, incoming JIDs use the `@lid` suffix, not `@s.whatsapp.net`.
+- **`client.ts` state machine:** the four states (`single`, `batch-idle`, `batch-confirming`, `processing`) must always transition correctly. Commands that change mode (`/batch`, `/single`) are blocked during `batch-confirming` and `processing`. `/cancel` resets to `batch-idle` (or stays `single`), never to `processing`.
 - **Template placeholders:** `{{IMAGE_1}}` through `{{IMAGE_10}}`, `{{TITLE}}`, `{{CAPTION}}`, `{{HASHTAGS}}`, and `{{NUMBER_OF_POSTS}}` must be in the template as literal text. Image placeholders must each be in their own cleanly deletable block. If any placeholder is missing, `fillDoc` logs a warning and skips it — it will not throw. Missing image in the output doc is a template setup issue, not a code bug.
 - **Google API quotas:** `documents.get` is called once per slot in Phase B (up to 10 calls per run). At low volume this is fine. If throughput ever matters, switch to a single `documents.get` + batched updates with manually adjusted indices.
