@@ -6,12 +6,10 @@ Send a `.zip` of carousel images + a caption to your WhatsApp bot and receive a 
 
 ## Setup
 
-### 1. VPS / Node
+### 1. Node
 
 ```bash
 node --version   # must be >= 20
-npm ci
-npm run build
 ```
 
 ### 2. Google Cloud project
@@ -33,8 +31,7 @@ npm run auth:google
 ### 4. Create Drive resources
 
 - Create two Google Docs templates (see template setup below) and paste their IDs into `.env` as `TEMPLATE_ID_IG` and `TEMPLATE_ID_IG_FB`
-- Create a Drive folder for approval docs → `OUTPUT_FOLDER_ID`
-- Create a Drive folder for temporary image uploads → `TEMP_IMAGE_FOLDER_ID`
+- Create a Drive folder for campaign output → `OUTPUT_FOLDER_ID` (a subfolder per campaign is created here automatically)
 
 ### 5. Template setup
 
@@ -45,13 +42,14 @@ Both templates must use these exact placeholders:
 | `{{TITLE}}` | Carousel title |
 | `{{CAPTION}}` | Caption body (no hashtags) |
 | `{{HASHTAGS}}` | Space-joined hashtag list |
+| `{{NUMBER_OF_POSTS}}` | Number of images in the carousel |
 | `{{IMAGE_1}}` … `{{IMAGE_10}}` | Inline image per slide |
 
 Each `{{IMAGE_N}}` must be in its own deletable block (a standalone paragraph or a single table row). Unused image slots are deleted entirely, so verify that removing any block leaves the document readable.
 
 The only difference between the two templates is the Platform field:
-- `TEMPLATE_ID_IG` → Instagram only
-- `TEMPLATE_ID_IG_FB` → Instagram + Facebook (triggered when caption body contains `TRIGGER_URL`)
+- `TEMPLATE_ID_IG` → Instagram only (selected when caption body **contains** `TRIGGER_URL`)
+- `TEMPLATE_ID_IG_FB` → Instagram + Facebook (selected when caption body does **not** contain `TRIGGER_URL`)
 
 ### 6. Fill in the rest of .env
 
@@ -62,18 +60,26 @@ TRIGGER_URL=instagram.com/p/               # substring that flips to IG+FB templ
 
 ### 7. Deploy with pm2
 
+The repo has a GitHub Action that builds on every push to `main` and commits `dist/` + `node_modules/` to a `deploy` branch. Pull that branch on the VPS — no build step needed.
+
 ```bash
-npm run build
+git clone -b deploy <repo-url> ~/approve-to-squish
+cd ~/approve-to-squish
+cp .env.example .env   # fill in your values
+mkdir -p data
 pm2 start ecosystem.config.js
 pm2 save
 pm2 startup   # follow the printed command to enable autostart
 ```
 
-On first start, watch logs for a QR code and link the bot from your phone:
+On first start, watch logs for the pairing code:
 
 ```bash
 pm2 logs approve-to-squish
+# WhatsApp → Linked Devices → Link with phone number → enter the code
 ```
+
+For future updates: `git pull && pm2 restart approve-to-squish`
 
 ## Usage
 
@@ -83,7 +89,7 @@ Send a WhatsApp message containing:
 
 You can send them together (zip with caption field) or separately within 2 minutes.
 
-The bot replies with the Google Docs URL when done, or a clear error message if something went wrong.
+The bot replies with the Google Docs URL and the campaign folder URL when done, or a clear error message if something went wrong.
 
 ## Project layout
 
