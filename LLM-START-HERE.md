@@ -19,7 +19,7 @@ WhatsApp message
   → Google Drive    createFolder(title) → uploadImage × N → copyTemplate
   → Google Docs     batchUpdate (text + NUMBER_OF_POSTS) + sequential batchUpdate × 10 (images)
   → Google Drive    renameFile → doc becomes "[APPROVAL | GRAPHICS] {title}"
-  → WhatsApp reply  doc URL + campaign folder URL, or error message
+  → WhatsApp reply  doc name + doc URL + campaign folder URL, or error message
 ```
 
 Output structure:
@@ -157,7 +157,7 @@ All required. Parsed in `src/config.ts`. See `.env.example` for the full list wi
 | `TEMPLATE_ID_IG / TEMPLATE_ID_IG_FB` | Google Doc IDs of the two templates. Both must have `{{TITLE}}`, `{{CAPTION}}`, `{{HASHTAGS}}`, `{{NUMBER_OF_POSTS}}`, and `{{IMAGE_1}}` through `{{IMAGE_10}}` placeholders. |
 | `OUTPUT_FOLDER_ID` | Drive folder where campaign folders are created. Each campaign folder contains the filled doc and all images. |
 | `TRIGGER_URL` | Substring in caption body that selects the IG-only template (absence selects IG+FB). |
-| `OUTPUT_DOC_PERMISSION` | `reader` or `writer` — the permission set on the output doc. |
+| `OUTPUT_DOC_PERMISSION` | `reader`, `commenter`, or `writer` — the permission set on the output doc. |
 | `PAIRING_TIMEOUT_MS` | How long to wait for the other half of a split zip+caption. Default: 120000. |
 
 ---

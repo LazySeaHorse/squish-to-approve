@@ -19,6 +19,7 @@ export interface PipelineResult {
   ok: true;
   url: string;
   folderUrl: string;
+  docName: string;
 }
 
 export interface PipelineError {
@@ -92,7 +93,7 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult 
     const url = `https://docs.google.com/document/d/${docId}/edit`;
     const folderUrl = `https://drive.google.com/drive/folders/${campaignFolderId}`;
 
-    return { ok: true, url, folderUrl };
+    return { ok: true, url, folderUrl, docName };
   } catch (err) {
     logger.error('Pipeline error:', err);
     return { ok: false, userMessage: '❌ Something broke. Check the logs.' };

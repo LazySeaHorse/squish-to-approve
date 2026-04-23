@@ -15,10 +15,9 @@ const schema = z.object({
   TEMPLATE_ID_IG_FB: z.string().min(1),
 
   OUTPUT_FOLDER_ID: z.string().min(1),
-  TEMP_IMAGE_FOLDER_ID: z.string().min(1),
 
   TRIGGER_URL: z.string().min(1),
-  OUTPUT_DOC_PERMISSION: z.enum(['reader', 'writer']).default('reader'),
+  OUTPUT_DOC_PERMISSION: z.enum(['reader', 'commenter', 'writer']).default('reader'),
   PAIRING_TIMEOUT_MS: z.coerce.number().default(120000),
 });
 
