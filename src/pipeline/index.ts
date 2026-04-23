@@ -64,12 +64,9 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult 
     const campaignFolderId = await createFolder(config.OUTPUT_FOLDER_ID, title);
 
     // ── Upload images to Drive ──────────────────────────────────────────────
-    const imageSlots: Array<{ driveFileId: string; publicUrl: string }> = [];
-
-    for (const filePath of imageFiles) {
-      const slot = await uploadImage(filePath, campaignFolderId);
-      imageSlots.push(slot);
-    }
+    const imageSlots = await Promise.all(
+      imageFiles.map(filePath => uploadImage(filePath, campaignFolderId)),
+    );
 
     // ── Select template and copy ────────────────────────────────────────────
     const igOnly = captionBody.includes(config.TRIGGER_URL);

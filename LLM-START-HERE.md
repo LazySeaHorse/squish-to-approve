@@ -41,7 +41,7 @@ OUTPUT_FOLDER_ID/
 | `src/logger.ts` | Thin wrapper around `console.log/warn/error` with ISO timestamps. |
 | `src/whatsapp/client.ts` | Entire WhatsApp layer: Baileys socket setup, reconnect logic, JID whitelist, message routing, pairing buffer. See "Pairing buffer" section below. |
 | `src/whatsapp/sqliteAuthState.ts` | Baileys auth state backed by SQLite instead of files. See "SQLite auth state" section below. |
-| `src/pipeline/index.ts` | Orchestrates the full pipeline for one request. The only place that knows the end-to-end order of operations. Returns `{ ok: true, url }` or `{ ok: false, userMessage }`. |
+| `src/pipeline/index.ts` | Orchestrates the full pipeline for one request. The only place that knows the end-to-end order of operations. Image uploads run in parallel via `Promise.all`. Returns `{ ok: true, url }` or `{ ok: false, userMessage }`. |
 | `src/pipeline/parseText.ts` | Pure function. Splits raw caption string into `{ title, captionBody, hashtags[] }`. No side effects. |
 | `src/pipeline/zip.ts` | Validates and extracts a zip file using `adm-zip`. Returns either `{ files: string[] }` (sorted image paths) or `{ kind, message }` error. |
 | `src/pipeline/cleanup.ts` | Deletes temp Drive files and local temp dir. Always called in a `finally` block. |
