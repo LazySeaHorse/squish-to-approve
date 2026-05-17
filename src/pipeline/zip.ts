@@ -31,8 +31,9 @@ export function extractAndValidateZip(
     return { kind: 'too_many', message: `${entries.length} images found; max is ${MAX_IMAGES}.` };
   }
 
-  // Validate naming: must match /^\d+\.(jpg|jpeg|png)$/i
-  const nameRe = /^0*(\d+)\.(jpg|jpeg|png)$/i;
+  // Validate naming: accept "name (1).png" or plain "1.png" / "02.jpg".
+  // Only the number is used; any prefix is ignored.
+  const nameRe = /^(?:.*\((\d+)\)|0*(\d+))\.(jpg|jpeg|png)$/i;
   const numbered: Array<{ n: number; name: string }> = [];
 
   for (const entry of entries) {
@@ -40,10 +41,10 @@ export function extractAndValidateZip(
     if (!m) {
       return {
         kind: 'wrong_naming',
-        message: `"${entry.name}" doesn't match the expected naming (1.jpg, 2.png, ...).`,
+        message: `"${entry.name}" doesn't match the expected naming (e.g. 1.jpg, "dives (1).png", ...).`,
       };
     }
-    numbered.push({ n: parseInt(m[1], 10), name: entry.name });
+    numbered.push({ n: parseInt(m[1] ?? m[2], 10), name: entry.name });
   }
 
   // Must have consecutive numbers 1..N
