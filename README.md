@@ -58,28 +58,53 @@ ALLOWED_JIDS=447911123456@s.whatsapp.net   # your own number
 TRIGGER_URL=instagram.com/p/               # substring that flips to IG+FB template
 ```
 
-### 7. Deploy with pm2
+### 7. Deploy with Docker
 
-The repo has a GitHub Action that builds on every push to `main` and commits `dist/` + `node_modules/` to a `deploy` branch. Pull that branch on the VPS — no build step needed.
+The image is built locally on the VPS — nothing is pushed to a registry.
+
+**Requirements:** Docker + Docker Compose (v2) installed on the host.
 
 ```bash
-git clone -b deploy <repo-url> ~/approve-to-squish
-cd ~/approve-to-squish
-cp .env.example .env   # fill in your values
-mkdir -p data
-pm2 start ecosystem.config.js
-pm2 save
-pm2 startup   # follow the printed command to enable autostart
+git clone <repo-url> ~/squish-to-approve
+cd ~/squish-to-approve
+cp .env.example .env   # fill in all values
+sudo docker compose up -d --build
 ```
 
-On first start, watch logs for the pairing code:
+On first start, watch logs for the WhatsApp pairing code:
 
 ```bash
-pm2 logs approve-to-squish
+sudo docker compose logs -f
 # WhatsApp → Linked Devices → Link with phone number → enter the code
 ```
 
-For future updates: `git pull && pm2 restart approve-to-squish`
+The session and SQLite DB are stored in a named Docker volume (`squish-to-approve_bot_data`) and survive container restarts and image rebuilds.
+
+#### Updates (pull new code)
+
+```bash
+git pull
+sudo docker compose up -d --build
+```
+
+Rebuilds the image and restarts the container. The volume — and your WhatsApp session — is untouched.
+
+#### Reset / switch to a new WhatsApp number
+
+```bash
+sudo docker compose down
+sudo docker volume rm squish-to-approve_bot_data
+sudo docker compose up -d
+sudo docker compose logs -f   # grab the new pairing code
+```
+
+#### Other useful commands
+
+```bash
+sudo docker compose ps          # container status
+sudo docker compose logs -f     # live logs
+sudo docker compose down        # stop and remove container (volume kept)
+```
 
 ## Usage
 

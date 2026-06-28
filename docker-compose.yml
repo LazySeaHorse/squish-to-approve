@@ -1,0 +1,26 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: squish-to-approve:latest   # local tag only, never pushed
+    container_name: squish-to-approve
+    restart: unless-stopped
+
+    # Mount the .env file (never baked into the image)
+    env_file:
+      - .env
+
+    volumes:
+      # Persistent data: SQLite DB + Baileys session/auth files
+      - bot_data:/app/data
+
+    # Optional: resource limits to be a good citizen on the shared VPS
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  bot_data:
+    driver: local
