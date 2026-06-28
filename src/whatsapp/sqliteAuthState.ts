@@ -7,6 +7,7 @@ import type { AuthenticationState, SignalDataTypeMap } from '@whiskeysockets/bai
 export interface SqliteAuthState {
   state: AuthenticationState;
   saveCreds: () => void;
+  clearAuthState: () => void;
 }
 
 export function useSqliteAuthState(dbPath: string): SqliteAuthState {
@@ -18,6 +19,8 @@ export function useSqliteAuthState(dbPath: string): SqliteAuthState {
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   )`);
+
+  const clearAll = db.prepare('DELETE FROM auth_state');
 
   const get = db.prepare<[string], { value: string }>('SELECT value FROM auth_state WHERE key = ?');
   const set = db.prepare('INSERT OR REPLACE INTO auth_state (key, value) VALUES (?, ?)');
@@ -75,6 +78,9 @@ export function useSqliteAuthState(dbPath: string): SqliteAuthState {
     },
     saveCreds() {
       writeData('creds.json', creds);
+    },
+    clearAuthState() {
+      clearAll.run();
     },
   };
 }

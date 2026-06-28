@@ -360,7 +360,7 @@ async function onPairCompleted(jid: string, zipMsg: WAMessage, captionText: stri
 // ── Connect ───────────────────────────────────────────────────────────────────
 
 async function connect(): Promise<void> {
-  const { state, saveCreds } = useSqliteAuthState(config.BAILEYS_DB_PATH);
+  const { state, saveCreds, clearAuthState } = useSqliteAuthState(config.BAILEYS_DB_PATH);
 
   const { version, isLatest } = await fetchLatestBaileysVersion();
   logger.info(`Connecting with WA v${version.join('.')} (isLatest: ${isLatest})`);
@@ -398,6 +398,12 @@ async function connect(): Promise<void> {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const reconnect = statusCode !== DisconnectReason.loggedOut;
       logger.warn(`Connection closed (${statusCode}). Reconnecting: ${reconnect}`);
+      if (!reconnect) {
+        // Clear the saved session so the next startup prompts for a new pairing
+        // code instead of immediately 401-looping on the dead credentials.
+        logger.info('Logged out by WhatsApp — clearing auth state for clean restart.');
+        clearAuthState();
+      }
       if (reconnect) setTimeout(connect, 3000);
     }
   });
