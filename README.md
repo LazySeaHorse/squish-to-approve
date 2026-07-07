@@ -141,7 +141,6 @@ If you prefer to run the binary directly on the host system without Docker:
    ExecStart=/home/ubuntu/squish-to-approve/bin/squish-bot
    Restart=always
    RestartSec=5
-   EnvironmentFile=/home/ubuntu/squish-to-approve/.env
 
    [Install]
    WantedBy=multi-user.target
