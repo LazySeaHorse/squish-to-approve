@@ -113,7 +113,7 @@ sudo docker compose logs -f     # live logs
 sudo docker compose down        # stop and remove container (volume kept)
 ```
 
-### 8. Deploy with PM2 (Alternative to Docker)
+### 8. Deploy with systemd (Alternative to Docker)
 
 If you prefer to run the binary directly on the host system without Docker:
 
@@ -127,28 +127,45 @@ If you prefer to run the binary directly on the host system without Docker:
    # Enter the pairing code on your phone
    # Press Ctrl+C once paired and connected
    ```
-3. **Start PM2 process**:
-   ```bash
-   pm2 start ecosystem.config.js
+3. **Configure systemd service**:
+   Create `/etc/systemd/system/squish-bot.service`:
+   ```ini
+   [Unit]
+   Description=WhatsApp to Google Docs Carousel Bot
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=ubuntu
+   WorkingDirectory=/home/ubuntu/squish-to-approve
+   ExecStart=/home/ubuntu/squish-to-approve/bin/squish-bot
+   Restart=always
+   RestartSec=5
+   EnvironmentFile=/home/ubuntu/squish-to-approve/.env
+
+   [Install]
+   WantedBy=multi-user.target
    ```
-4. **Save PM2 config** (ensures it restarts on reboot):
+4. **Enable and start the service**:
    ```bash
-   pm2 save
+   sudo systemctl daemon-reload
+   sudo systemctl enable squish-bot
+   sudo systemctl start squish-bot
    ```
 
 To check logs or status:
 ```bash
-pm2 logs approve-to-squish
-pm2 status
+sudo systemctl status squish-bot
+sudo journalctl -u squish-bot -f
 ```
 
-#### Reset / switch to a new WhatsApp number (PM2)
+#### Reset / switch to a new WhatsApp number (systemd)
 
 ```bash
-pm2 stop approve-to-squish
+sudo systemctl stop squish-bot
 rm ./data/whatsmeow.db
 ./bin/squish-bot              # run manually to link new number, then Ctrl+C
-pm2 start approve-to-squish
+sudo systemctl start squish-bot
 ```
 
 ---
