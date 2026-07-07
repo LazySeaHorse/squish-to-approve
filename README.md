@@ -142,6 +142,15 @@ pm2 logs approve-to-squish
 pm2 status
 ```
 
+#### Reset / switch to a new WhatsApp number (PM2)
+
+```bash
+pm2 stop approve-to-squish
+rm ./data/whatsmeow.db
+./bin/squish-bot              # run manually to link new number, then Ctrl+C
+pm2 start approve-to-squish
+```
+
 ---
 
 ## Usage
