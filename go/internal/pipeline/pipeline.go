@@ -17,9 +17,10 @@ import (
 
 // Input is the per-request payload passed in from the WhatsApp client.
 type Input struct {
-	MsgID       string
-	ZipData     []byte
-	CaptionText string
+	MsgID          string
+	ZipData        []byte
+	CaptionText    string
+	OutputFolderID string
 }
 
 // Result is returned on success.
@@ -72,7 +73,11 @@ func Run(ctx context.Context, cfg *config.Config, httpClient *http.Client, in In
 	}
 
 	// ── Create campaign folder ──────────────────────────────────────────────
-	campaignFolderID, err := google.CreateFolder(ctx, httpClient, cfg.OutputFolderID, parsed.Title)
+	targetFolderID := in.OutputFolderID
+	if targetFolderID == "" {
+		targetFolderID = cfg.OutputFolderID
+	}
+	campaignFolderID, err := google.CreateFolder(ctx, httpClient, targetFolderID, parsed.Title)
 	if err != nil {
 		slog.Error("createFolder failed", "err", err)
 		return Result{}, fmt.Errorf("❌ Couldn't create the campaign folder. Check the logs.")

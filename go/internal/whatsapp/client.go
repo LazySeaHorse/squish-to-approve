@@ -37,6 +37,20 @@ const (
 	stateProcessing
 )
 
+func (s clientState) String() string {
+	switch s {
+	case stateSingle:
+		return "single"
+	case stateBatchIdle:
+		return "batch-idle"
+	case stateBatchConfirming:
+		return "batch-confirming"
+	case stateProcessing:
+		return "processing"
+	}
+	return "unknown"
+}
+
 // queuedJob is a fully paired job ready for processing in batch mode.
 type queuedJob struct {
 	msgID        string
@@ -60,6 +74,7 @@ type jidState struct {
 	pendingZips     []timedItem[*events.Message]
 	pendingCaptions []timedItem[string]
 	readyJobs       []queuedJob
+	outputFolderID  string // override output folder ID per JID
 }
 
 // ── Client ────────────────────────────────────────────────────────────────────
@@ -400,15 +415,17 @@ func (c *Client) onPairCompleted(replyJID, stateKey string, msg *events.Message,
 	s := c.getState(stateKey)
 	s.mu.Lock()
 	mode := s.mode
+	folderOverride := s.outputFolderID
 	s.mu.Unlock()
 
 	if mode == stateSingle {
 		c.sendText(replyJID, "⏳ Got both. Building the doc...")
 		slog.Info("processing carousel", "replyJID", replyJID, "msgID", msg.Info.ID)
 		result, err := pipeline.Run(context.Background(), c.cfg, c.httpClient, pipeline.Input{
-			MsgID:       string(msg.Info.ID),
-			ZipData:     zipData,
-			CaptionText: captionText,
+			MsgID:          string(msg.Info.ID),
+			ZipData:        zipData,
+			CaptionText:    captionText,
+			OutputFolderID: folderOverride,
 		})
 		if err != nil {
 			c.sendText(replyJID, err.Error())
@@ -454,6 +471,8 @@ func (c *Client) onPairCompleted(replyJID, stateKey string, msg *events.Message,
 const helpText = `🤖 *Commands*
 
 */help* — Show this message
+*/info* — Show current state and output folder URL
+*/folder [id/url]* — Set custom output folder, or reset if blank
 */batch* — Switch to batch mode (queue pairs, process on /go)
 */single* — Switch to single mode (process each pair immediately)
 */go* — (Batch mode) Preview queued pairs
@@ -470,12 +489,55 @@ Send a zip + caption (together or separately). The doc is built immediately.
 4. Send /ok to process, or /cancel to abort`
 
 func (c *Client) handleCommand(replyJID, stateKey, text string) {
-	cmd := strings.ToLower(strings.TrimSpace(text))
+	textTrimmed := strings.TrimSpace(text)
+	parts := strings.Fields(textTrimmed)
+	if len(parts) == 0 {
+		return
+	}
+	cmd := strings.ToLower(parts[0])
 	s := c.getState(stateKey)
 
 	switch cmd {
 	case "/help":
 		c.sendText(replyJID, helpText)
+
+	case "/info":
+		s.mu.Lock()
+		modeStr := s.mode.String()
+		folderID := s.outputFolderID
+		s.mu.Unlock()
+
+		if folderID == "" {
+			folderID = c.cfg.OutputFolderID
+		}
+		folderURL := fmt.Sprintf("https://drive.google.com/drive/folders/%s", folderID)
+
+		c.sendText(replyJID, fmt.Sprintf("🤖 *Status Info*\n\nMode: *%s*\nOutput Folder: %s", modeStr, folderURL))
+
+	case "/folder":
+		s.mu.Lock()
+		mode := s.mode
+		s.mu.Unlock()
+		if mode == stateProcessing {
+			c.sendText(replyJID, "⏳ Currently processing. Wait for it to finish.")
+			return
+		}
+		if len(parts) < 2 {
+			s.mu.Lock()
+			s.outputFolderID = ""
+			s.mu.Unlock()
+			c.sendText(replyJID, fmt.Sprintf("✅ Saved folder reset to default: https://drive.google.com/drive/folders/%s", c.cfg.OutputFolderID))
+		} else {
+			targetID := extractFolderID(parts[1])
+			if targetID == "" {
+				c.sendText(replyJID, "❌ Could not parse folder ID/URL.")
+				return
+			}
+			s.mu.Lock()
+			s.outputFolderID = targetID
+			s.mu.Unlock()
+			c.sendText(replyJID, fmt.Sprintf("✅ Output folder changed to: https://drive.google.com/drive/folders/%s", targetID))
+		}
 
 	case "/batch":
 		s.mu.Lock()
@@ -578,6 +640,24 @@ func (c *Client) handleCommand(replyJID, stateKey, text string) {
 	}
 }
 
+func extractFolderID(input string) string {
+	input = strings.TrimSpace(input)
+	if strings.Contains(input, "/folders/") {
+		parts := strings.Split(input, "/folders/")
+		if len(parts) > 1 {
+			id := parts[1]
+			if idx := strings.Index(id, "?"); idx != -1 {
+				id = id[:idx]
+			}
+			if idx := strings.Index(id, "/"); idx != -1 {
+				id = id[:idx]
+			}
+			return strings.TrimSpace(id)
+		}
+	}
+	return input
+}
+
 // ── Batch processing ──────────────────────────────────────────────────────────
 
 func (c *Client) processBatch(replyJID, stateKey string) {
@@ -588,6 +668,7 @@ func (c *Client) processBatch(replyJID, stateKey string) {
 	copy(jobs, s.readyJobs)
 	s.readyJobs = nil
 	s.mode = stateProcessing
+	folderOverride := s.outputFolderID
 	s.mu.Unlock()
 
 	c.sendText(replyJID, fmt.Sprintf("⏳ Processing %s...", pluralPairs(len(jobs))))
@@ -604,9 +685,10 @@ func (c *Client) processBatch(replyJID, stateKey string) {
 		}
 
 		result, err := pipeline.Run(context.Background(), c.cfg, c.httpClient, pipeline.Input{
-			MsgID:       job.msgID,
-			ZipData:     zipData,
-			CaptionText: job.captionText,
+			MsgID:          job.msgID,
+			ZipData:        zipData,
+			CaptionText:    job.captionText,
+			OutputFolderID: folderOverride,
 		})
 		if err != nil {
 			c.sendText(replyJID, fmt.Sprintf("❌ %s\n%s", label, err.Error()))
