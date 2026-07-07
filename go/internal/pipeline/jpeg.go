@@ -2,16 +2,15 @@ package pipeline
 
 import (
 	"image"
-	_ "image/jpeg" // register JPEG decoder
+	_ "image/gif"  // register GIF decoder
+	"image/jpeg"
 	_ "image/png"  // register PNG decoder
 	"os"
-
-	"github.com/chai2010/webp"
 )
 
-// ConvertToWebP decodes a JPEG/PNG image from srcPath, encodes it as a WebP image with specified quality,
+// ConvertToJPEG decodes an image from srcPath, encodes it as a JPEG with specified quality,
 // and saves it to destPath.
-func ConvertToWebP(srcPath, destPath string, quality float32) error {
+func ConvertToJPEG(srcPath, destPath string, quality int) error {
 	sf, err := os.Open(srcPath)
 	if err != nil {
 		return err
@@ -29,8 +28,7 @@ func ConvertToWebP(srcPath, destPath string, quality float32) error {
 	}
 	defer df.Close()
 
-	return webp.Encode(df, img, &webp.Options{
-		Lossless: false,
-		Quality:  quality,
+	return jpeg.Encode(df, img, &jpeg.Options{
+		Quality: quality,
 	})
 }

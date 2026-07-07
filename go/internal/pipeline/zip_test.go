@@ -67,8 +67,8 @@ func TestExtractAndValidateZip(t *testing.T) {
 		if len(files) != 1 {
 			t.Fatalf("expected 1 file, got %d", len(files))
 		}
-		if filepath.Base(files[0]) != "1.webp" {
-			t.Errorf("expected 1.webp, got %s", filepath.Base(files[0]))
+		if filepath.Base(files[0]) != "1.jpg" {
+			t.Errorf("expected 1.jpg, got %s", filepath.Base(files[0]))
 		}
 	})
 
@@ -86,7 +86,7 @@ func TestExtractAndValidateZip(t *testing.T) {
 		if len(files) != 3 {
 			t.Fatalf("expected 3 files, got %d", len(files))
 		}
-		expected := []string{"1.webp", "2.webp", "3.webp"}
+		expected := []string{"1.jpg", "2.jpg", "3.jpg"}
 		for i, name := range expected {
 			if filepath.Base(files[i]) != name {
 				t.Errorf("expected %s at index %d, got %s", name, i, filepath.Base(files[i]))
@@ -122,8 +122,8 @@ func TestExtractAndValidateZip(t *testing.T) {
 		if len(files) != 2 {
 			t.Fatalf("expected 2 files, got %d", len(files))
 		}
-		if filepath.Base(files[0]) != "dives (1).webp" {
-			t.Errorf("expected dives (1).webp, got %s", filepath.Base(files[0]))
+		if filepath.Base(files[0]) != "dives (1).jpg" {
+			t.Errorf("expected dives (1).jpg, got %s", filepath.Base(files[0]))
 		}
 	})
 

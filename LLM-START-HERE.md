@@ -42,8 +42,8 @@ OUTPUT_FOLDER_ID/
 | `go/internal/whatsapp/client.go` | WhatsApp layer using `whatsmeow`: session initialization, JID whitelist, message routing, pairing buffers, and command handling. |
 | `go/internal/pipeline/pipeline.go` | Orchestrates the full pipeline for one request. Parallel uploads via Goroutines + WaitGroup. |
 | `go/internal/pipeline/parsetext.go` | Splits raw caption string into `{ title, captionBody, hashtags[] }`. |
-| `go/internal/pipeline/zip.go` | Validates and extracts a zip file. Converts images to WebP format. |
-| `go/internal/pipeline/webp.go` | Helper to decode JPEG/PNG and encode to WebP (80% quality). |
+| `go/internal/pipeline/zip.go` | Validates and extracts a zip file. Converts images to JPEG format. |
+| `go/internal/pipeline/jpeg.go` | Helper to decode PNG/JPEG and encode to compressed JPEG (80% quality). |
 | `go/internal/pipeline/cleanup.go` | Deletes temporary local folders. |
 | `go/internal/google/auth.go` | Returns a configured OAuth2-capable `*http.Client` using `golang.org/x/oauth2`. |
 | `go/internal/google/drive.go` | `CreateFolder`, `CopyTemplate`, `UploadImage`, `RenameFile`, `DeleteFile`, `ShareDoc` implementation. |
@@ -92,9 +92,9 @@ The IG-only vs IG+Facebook distinction is a "Platform" smart-chip dropdown in Go
 
 The Docs API `insertInlineImage` takes a public URI. We upload each image to the campaign folder, grant public read permissions, and pass `https://drive.google.com/uc?id=<id>` to the Docs API.
 
-### Why we convert images to WebP (80% quality)
+### Why we convert images to JPEG (80% quality)
 
-To save storage space in Google Drive, all extracted images are converted to WebP with 80% quality during extraction in `zip.go`. The original PNG/JPEG files are deleted from the local disk immediately after conversion, and the pipeline only uploads `.webp` files.
+To save storage space in Google Drive (since Google Docs API does not support WebP images in `insertInlineImage` requests), all extracted images are converted to JPEG with 80% quality during extraction in `zip.go`. The original PNG/JPEG files are deleted from the local disk immediately after conversion, and the pipeline only uploads compressed `.jpg` files.
 
 ---
 

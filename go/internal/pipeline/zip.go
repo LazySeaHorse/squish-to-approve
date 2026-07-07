@@ -109,16 +109,16 @@ func ExtractAndValidateZip(zipPath, destDir string) ([]string, error) {
 			return nil, fmt.Errorf("extract %s: %w", e.name, err)
 		}
 
-		// Convert to WebP (80% quality) and delete original to save Drive space
-		webpName := strings.TrimSuffix(e.name, filepath.Ext(e.name)) + ".webp"
-		webpDest := filepath.Join(destDir, webpName)
+		// Convert to JPEG (80% quality) and delete original to save Drive space (since Docs API doesn't support WebP)
+		jpgName := strings.TrimSuffix(e.name, filepath.Ext(e.name)) + ".jpg"
+		jpgDest := filepath.Join(destDir, jpgName)
 
-		if err := ConvertToWebP(dest, webpDest, 80); err != nil {
-			return nil, fmt.Errorf("convert %s to webp: %w", e.name, err)
+		if err := ConvertToJPEG(dest, jpgDest, 80); err != nil {
+			return nil, fmt.Errorf("convert %s to jpeg: %w", e.name, err)
 		}
 		_ = os.Remove(dest)
 
-		paths[i] = webpDest
+		paths[i] = jpgDest
 	}
 
 	return paths, nil
