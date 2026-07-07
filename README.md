@@ -1,22 +1,28 @@
 # approve-to-squish
 
-WhatsApp → Google Docs carousel approval automation.
+WhatsApp → Google Docs carousel approval automation, rewritten in Go.
 
 Send a `.zip` of carousel images + a caption to your WhatsApp bot and receive a filled-out Google Docs approval document in return.
 
+---
+
 ## Setup
 
-### 1. Node
+### 1. Go Environment
+
+Ensure you have Go installed (version >= 1.25):
 
 ```bash
-node --version   # must be >= 20
+go version
 ```
+
+You also need a C compiler (`gcc` or similar) installed on your host system as CGo is required to compile the SQLite auth backend (`go-sqlite3`).
 
 ### 2. Google Cloud project
 
-1. Create a project at console.cloud.google.com
+1. Create a project at [console.cloud.google.com](https://console.cloud.google.com)
 2. Enable **Google Docs API** and **Google Drive API**
-3. Create OAuth 2.0 credentials (type: Web application), add `http://localhost:3000/oauth2callback` as an authorised redirect URI
+3. Create OAuth 2.0 credentials (type: Web application), and add `http://localhost:3000/callback` as an authorised redirect URI.
 4. Copy the client ID and secret into `.env`
 
 ### 3. Get a refresh token
@@ -24,7 +30,8 @@ node --version   # must be >= 20
 ```bash
 cp .env.example .env
 # Fill in GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
-npm run auth:google
+cd go && go build -o ../bin/auth-google ./cmd/auth-google/
+cd .. && ./bin/auth-google
 # Open the printed URL, authorise, copy the refresh token into .env
 ```
 
@@ -54,8 +61,8 @@ The only difference between the two templates is the Platform field:
 ### 6. Fill in the rest of .env
 
 ```
-ALLOWED_JIDS=447911123456@s.whatsapp.net   # your own number
-TRIGGER_URL=instagram.com/p/               # substring that flips to IG+FB template
+ALLOWED_JIDS=94721470618@s.whatsapp.net,48043604889668@lid   # your number or linked devices
+TRIGGER_URL=sincerely.aiesec.lk                             # substring that flips to IG-only template
 ```
 
 ### 7. Deploy with Docker
@@ -106,6 +113,8 @@ sudo docker compose logs -f     # live logs
 sudo docker compose down        # stop and remove container (volume kept)
 ```
 
+---
+
 ## Usage
 
 Send a WhatsApp message containing:
@@ -116,26 +125,30 @@ You can send them together (zip with caption field) or separately within 2 minut
 
 The bot replies with the Google Docs URL and the campaign folder URL when done, or a clear error message if something went wrong.
 
+---
+
 ## Project layout
 
 ```
-src/
-  index.ts                 entrypoint
-  config.ts                env parsing (zod)
-  logger.ts
-  google/
-    auth.ts                OAuth2 client
-    drive.ts               file copy/upload/share/delete
-    docs.ts                batchUpdate logic (text + images)
-  pipeline/
-    index.ts               orchestration
-    zip.ts                 extract + validate
-    parseText.ts           title/caption/hashtags parsing
-    cleanup.ts             Drive + local temp cleanup
-  whatsapp/
-    client.ts              Baileys setup, message routing, pairing buffer
-    sqliteAuthState.ts     SQLite-backed auth state (replaces multi-file state)
-scripts/
-  auth-google.ts           one-time OAuth consent flow
-data/                      baileys.db lives here (gitignored)
+go/
+  cmd/
+    bot/
+      main.go               entrypoint
+    auth-google/
+      main.go               one-time OAuth consent flow CLI
+  internal/
+    config/
+      config.go             manual env validation/parsing
+    google/
+      auth.go               OAuth2 token retrieval
+      drive.go              drive folder, upload, and sharing operations
+      docs.go               filling doc with text and sequential images
+    pipeline/
+      pipeline.go           pipeline orchestrator (parallel uploads)
+      parsetext.go          title and hashtag parser
+      zip.go                zip extraction and index-based validation
+      cleanup.go            temporary directory cleanup
+  README.md
+data/
+  whatsmeow.db              SQLite database for whatsmeow credentials (gitignored)
 ```

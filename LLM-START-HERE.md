@@ -14,12 +14,12 @@ Single-user WhatsApp bot. The operator forwards a `.zip` of carousel images + a 
 
 ```
 WhatsApp message
-  → client.ts       detect zip / caption, pair them if split across messages
-  → pipeline/       download zip, validate, parse text, create campaign folder
-  → Google Drive    createFolder(title) → uploadImage × N → copyTemplate
-  → Google Docs     batchUpdate (text + NUMBER_OF_POSTS) + sequential batchUpdate × 10 (images)
-  → Google Drive    renameFile → doc becomes "[APPROVAL | GRAPHICS] {title}"
-  → WhatsApp reply  doc name + doc URL + campaign folder URL, or error message
+  → go/internal/whatsapp/client.go    detect zip / caption, pair them if split across messages
+  → go/internal/pipeline/             download zip, validate, parse text, create campaign folder
+  → Google Drive                      createFolder(title) → uploadImage × N → copyTemplate
+  → Google Docs                       batchUpdate (text + NUMBER_OF_POSTS) + sequential batchUpdate × 10 (images)
+  → Google Drive                      renameFile → doc becomes "[APPROVAL | GRAPHICS] {title}"
+  → WhatsApp reply                    doc name + doc URL + campaign folder URL, or error message
 ```
 
 Output structure:
@@ -34,177 +34,84 @@ OUTPUT_FOLDER_ID/
 
 ## File map
 
-| File | What it does |
+| File / Folder | What it does |
 |---|---|
-| `src/index.ts` | Entrypoint. Calls `connect()`, attaches unhandled-rejection logger. |
-| `src/config.ts` | Parses and validates all env vars with Zod. Process exits immediately on misconfiguration. Single import for all config across the app. |
-| `src/logger.ts` | Thin wrapper around `console.log/warn/error` with ISO timestamps. |
-| `src/whatsapp/client.ts` | Entire WhatsApp layer: Baileys socket setup, reconnect logic, JID whitelist, message routing, pairing buffer, command handling (`/help`, `/batch`, `/single`, `/go`, `/ok`, `/cancel`), and batch processing queue. See "Pairing buffer", "Batch mode", and "Commands" sections below. |
-| `src/whatsapp/sqliteAuthState.ts` | Baileys auth state backed by SQLite instead of files. See "SQLite auth state" section below. |
-| `src/pipeline/index.ts` | Orchestrates the full pipeline for one request. The only place that knows the end-to-end order of operations. Image uploads run in parallel via `Promise.all`. Returns `{ ok: true, url }` or `{ ok: false, userMessage }`. |
-| `src/pipeline/parseText.ts` | Pure function. Splits raw caption string into `{ title, captionBody, hashtags[] }`. No side effects. |
-| `src/pipeline/zip.ts` | Validates and extracts a zip file using `adm-zip`. Returns either `{ files: string[] }` (sorted image paths) or `{ kind, message }` error. |
-| `src/pipeline/cleanup.ts` | Deletes temp Drive files and local temp dir. Always called in a `finally` block. |
-| `src/google/auth.ts` | Returns a configured `OAuth2Client` with the refresh token set. Called on every request — tokens are fetched/refreshed lazily by the Google SDK. |
-| `src/google/drive.ts` | `copyTemplate`, `uploadImage`, `shareDoc`, `deleteFile`. All Drive operations. |
-| `src/google/docs.ts` | `fillDoc` — the most complex function. Two-phase doc filling. See "Doc filling" section below. |
-| `scripts/auth-google.ts` | One-time OAuth consent flow. Starts a localhost:3000 HTTP server, catches the callback, prints the refresh token. Run once with `npm run auth:google`. |
+| `go/cmd/bot/main.go` | Entrypoint. Loads config, initializes clients, starts WhatsApp loop, handles graceful shutdown. |
+| `go/cmd/auth-google/main.go` | One-time OAuth consent flow. Starts a localhost:3000 HTTP server, catches the callback, prints the refresh token. |
+| `go/internal/config/config.go` | Parses and validates all env vars from `.env` using manual validation. Exits on failure. |
+| `go/internal/whatsapp/client.go` | WhatsApp layer using `whatsmeow`: session initialization, JID whitelist, message routing, pairing buffers, and command handling. |
+| `go/internal/pipeline/pipeline.go` | Orchestrates the full pipeline for one request. Parallel uploads via Goroutines + WaitGroup. |
+| `go/internal/pipeline/parsetext.go` | Splits raw caption string into `{ title, captionBody, hashtags[] }`. |
+| `go/internal/pipeline/zip.go` | Validates and extracts a zip file. Accepts files matching `1.jpg`, `dives (1).png`, etc. |
+| `go/internal/pipeline/cleanup.go` | Deletes temporary local folders. |
+| `go/internal/google/auth.go` | Returns a configured OAuth2-capable `*http.Client` using `golang.org/x/oauth2`. |
+| `go/internal/google/drive.go` | `CreateFolder`, `CopyTemplate`, `UploadImage`, `RenameFile`, `DeleteFile`, `ShareDoc` implementation. |
+| `go/internal/google/docs.go` | `FillDoc` — Phase A (text replacements) and Phase B (sequential slot-by-slot image insertion). |
 
 ---
 
 ## Key design decisions
 
-### Why SQLite auth state instead of `useMultiFileAuthState`
+### Why whatsmeow with SQLite auth state
 
-Baileys' built-in `useMultiFileAuthState` creates one JSON file per signal key — this can reach thousands of files for an active session. We implemented `useSqliteAuthState` (single `auth_state` table, `key TEXT PRIMARY KEY, value TEXT`) using `better-sqlite3`. The logic is structurally identical to the Baileys built-in: same `BufferJSON` serialisation, same `app-state-sync-key` protobuf reconstruction, same `fixKey` slash/colon sanitisation. `saveCreds` is synchronous here (better-sqlite3 is sync-only), which is fine — Baileys calls it on credential updates.
+We use `go.mau.fi/whatsmeow` for WhatsApp. Session storage is handled via `whatsmeow/store/sqlstore` using `database/sql` backed by SQLite at `data/whatsmeow.db`. Unlike Baileys which required custom SQLite serialization code, `whatsmeow` manages its own SQL schema out of the box.
 
-No published SQLite auth-state npm package was available at time of writing. We own this code in `sqliteAuthState.ts`.
+### Why the pairing buffer stores raw messages instead of buffers
 
-### Why the pairing buffer stores the raw `WAMessage` instead of the downloaded buffer
+The user might send a zip and then type the caption seconds later. The pairing buffer stores the raw `*events.Message` object (or the raw caption text string) and downloads the zip only when both halves are successfully paired.
 
-The user might send a zip and then type the caption seconds later. An earlier design downloaded the zip eagerly (before the caption arrived) and stored the `Buffer`. This introduced a race: if the caption arrived before the download finished, `processWithBuffers` would get an empty buffer. The fix was to store the raw `WAMessage` object and download only when both halves are paired — at that point we have the full message metadata needed for `downloadMediaMessage`.
-
-The pairing buffer uses dual FIFO queues per JID (`pendingZips[]` and `pendingCaptions[]`) instead of a single slot. This correctly handles multiple pairs sent in any interleaving order. Each queue item has its own `setTimeout` for expiry. When a pair completes, the zip is downloaded immediately (needed for both modes — single mode processes right away; batch mode needs the buffer to count images for the `/go` preview).
+The pairing buffer uses dual queues per state key (FIFO) to handle interleaved arrivals. Each queue item has a `context.CancelFunc` and a timer that expires after `PAIRING_TIMEOUT_MS`.
 
 ### Batch mode and commands
 
 The bot has two operating modes controlled by user commands:
+- **Single mode** (default): each completed pair is processed immediately.
+- **Batch mode** (`/batch`): completed pairs are queued in `readyJobs[]`. The user sends `/go` to see a preview, then `/ok` to process sequentially, or `/cancel` to abort.
 
-- **Single mode** (default): each completed pair is processed immediately — identical to the original behaviour.
-- **Batch mode** (`/batch`): completed pairs are queued in `readyJobs[]`. The user sends `/go` to see a preview (title + zip filename + image count per pair), then `/ok` to process sequentially, or `/cancel` to abort.
-
-The state machine per JID has four states: `single`, `batch-idle`, `batch-confirming` (after `/go`, waiting for `/ok` or `/cancel`), and `processing`. During `processing`, new content and mode-switching commands are blocked. `/cancel` clears both the pairing buffer and the ready queue but cannot interrupt an active processing run.
-
-**Disk spooling:** To keep RAM usage low (512 MB VPS), zips in batch mode are saved to `data/batch-spool/` immediately after pairing. `readyJobs` stores the file path, not the buffer. Only one zip is loaded into RAM at a time during processing. Files are cleaned up after the batch completes or on `/cancel`.
-
-Batch processing is sequential (`for` loop with `await`) — the VPS has 1 vCPU, so concurrent pipelines would exhaust resources.
+The state machine per JID has four states: `single`, `batch-idle`, `batch-confirming`, and `processing`.
+During `processing`, new messages and mode-switching commands are blocked.
+Batch processing is sequential (`for` loop) to keep RAM usage low (512 MB VPS) and avoid resource exhaustion.
+Zips in batch mode are spooled to `data/batch-spool/` immediately after pairing to save memory, and deleted upon completion or cancellation.
 
 Full command list: `/help`, `/batch`, `/single`, `/go`, `/ok`, `/cancel`.
 
-### Why browser string is `Browsers.ubuntu('Chrome')` and not `macOS('Desktop')`
+### Why browser string is `PairClientChrome` ("Chrome (Linux)")
 
-WhatsApp's servers reject pairing code requests from unrecognized client fingerprints. `Browsers.macOS('Desktop')` produces a vague tuple that WhatsApp flags as suspicious. The fix is `Browsers.ubuntu('Chrome')`, which generates a Chrome-like user agent that WhatsApp accepts for phone-number authentication. This is Baileys' documented approach for pairing codes.
-
-Also: the `requestPairingCode` call must happen in the `connection.update` event handler when the `qr` signal fires — not immediately after socket creation. The `qr` event indicates the WebSocket handshake with WhatsApp's servers is complete and they're ready for authentication. Calling too early (before WS is ready) fails with 428 Precondition Required.
+WhatsApp's servers reject pairing code requests from unrecognized client fingerprints. We request pairing via `PairClientChrome` and display name `"Chrome (Linux)"` to match typical browser targets.
 
 ### Why image slots are processed 10 → 1 (reverse order) sequentially with re-fetch
 
-The Google Docs API works on character indices. When you delete or insert content, all indices after that point shift. Processing image slots from 10 down to 1 would preserve earlier indices if we processed them in one batched update — *but* the delete-block and insert-image operations in Phase B change document length unpredictably (images have variable sizes). Rather than track shifting offsets manually, we re-fetch `documents.get` before each slot. It costs ~10 extra API calls but is bulletproof. This was an explicit tradeoff in the original spec: "Start with sequential; optimize only if it's too slow."
+The Google Docs API works on character indices. When content is inserted or deleted, all indices after that point shift. To avoid tracking shifting offsets manually, we re-fetch the document via `documents.get` before each slot. It costs ~10 extra API calls but is bulletproof.
 
 ### Why two template IDs instead of one
 
-The IG-only vs IG+Facebook distinction is a "Platform" smart-chip dropdown in Google Docs — it cannot be set via the Docs API (smart chips are not exposed as `batchUpdate` operations). The only way to pre-set it is to have two separate template documents with the field already filled. Template selection is driven by `captionBody.includes(TRIGGER_URL)`: URL found → IG-only template (`TEMPLATE_ID_IG`); URL absent → IG+FB template (`TEMPLATE_ID_IG_FB`).
+The IG-only vs IG+Facebook distinction is a "Platform" smart-chip dropdown in Google Docs, which cannot be set via the Docs API. Therefore, we keep two template files. Template selection is driven by `captionBody.includes(TRIGGER_URL)`: URL found → `TEMPLATE_ID_IG`; URL absent → `TEMPLATE_ID_IG_FB`.
 
 ### Why we upload images to Drive before inserting them into Docs
 
-The Docs API `insertInlineImage` takes a URI, not raw bytes. The URI must be publicly readable when the Docs API fetches it. We upload each image to the campaign folder, set `{ role: reader, type: anyone }` permission, and pass `https://drive.google.com/uc?id=<id>`. These files are kept permanently (not deleted) so they remain accessible in the campaign folder alongside the filled doc.
-
-> **Open item:** if the Docs API rejects `drive.google.com/uc?id=` links (this has varied across API versions), try the `webContentLink` from the Drive upload response instead. Verify empirically.
-
----
-
-## Doc filling in detail (`src/google/docs.ts`)
-
-`fillDoc(docId, title, captionBody, hashtags, images[])` runs in two phases:
-
-**Phase A — text (one batchUpdate, four replaceAllText):**
-- `{{TITLE}}` → title
-- `{{CAPTION}}` → captionBody
-- `{{HASHTAGS}}` → hashtags joined by spaces
-- `{{NUMBER_OF_POSTS}}` → number of images in the carousel
-
-**Phase B — images (loop from slot 10 down to 1):**
-
-For each slot N:
-1. Call `documents.get` to get fresh character indices.
-2. If `images[N-1]` exists (slot is used):
-   - Find the exact range of the `{{IMAGE_N}}` placeholder text.
-   - `deleteContentRange` on that range, then `insertInlineImage` at the same start index.
-3. If `images[N-1]` is undefined (slot is unused):
-   - Find the range of the **entire block** (paragraph or table row) containing `{{IMAGE_N}}`.
-   - `deleteContentRange` on the full block.
-
-**Why the block deletion matters:** unused image slots should vanish cleanly, taking their "Slide N:" label with them. The template must be set up so each slot and its label share one deletable unit (a standalone paragraph or a single table row). The `findBlockRange` function in `docs.ts` handles both cases.
-
----
-
-## Caption parsing rules (`src/pipeline/parseText.ts`)
-
-Given raw input:
-```
-This is the title
-Caption line one
-Caption line two
-#hashtag1 #hashtag2
-```
-
-- **Title:** everything before the first `\n`, trimmed.
-- **Hashtags:** all `/#[\w]+/g` matches from the body (everything after line 1), deduplicated in order.
-- **Caption body:** body with hashtag tokens stripped, trailing whitespace trimmed per line, runs of 3+ consecutive newlines collapsed to 2.
-
-Edge case: if there is no `\n` in the input, the entire text is treated as the title, hashtags are extracted from it, and `captionBody` is empty. The pipeline then checks `title` is non-empty and rejects if not.
-
----
-
-## Zip validation rules (`src/pipeline/zip.ts`)
-
-Before validation, entries are filtered to only root-level image files (`.jpg`/`.jpeg`/`.png` with no `/` in `entryName`). This silently drops macOS junk (`__MACOSX/`, `._` resource forks, `.DS_Store`), subdirectories, and any non-image files.
-
-Validation runs on the filtered set, first failure wins:
-1. Zero entries → `empty`
-2. > 10 entries → `too_many`
-3. Any filename not matching `/^0*(\d+)\.(jpg|jpeg|png)$/i` → `wrong_naming`
-4. Numeric parts are not consecutive starting at 1 → `missing_numbers`
-
-On success, returns `files[]` sorted by numeric index. The numeric sort is important — filesystem order from the zip is not guaranteed.
-
----
-
-## Environment variables
-
-All required. Parsed in `src/config.ts`. See `.env.example` for the full list with comments.
-
-| Variable | Purpose |
-|---|---|
-| `ALLOWED_JIDS` | Comma-separated. Only messages from these JIDs are processed. Format: `{phone}@s.whatsapp.net` or `{phone}@lid` (for linked devices). |
-| `BAILEYS_DB_PATH` | Path to the SQLite auth database. Default: `./data/baileys.db`. |
-| `GOOGLE_CLIENT_ID / SECRET / REFRESH_TOKEN` | OAuth2 credentials. Refresh token obtained via `npm run auth:google`. |
-| `TEMPLATE_ID_IG / TEMPLATE_ID_IG_FB` | Google Doc IDs of the two templates. Both must have `{{TITLE}}`, `{{CAPTION}}`, `{{HASHTAGS}}`, `{{NUMBER_OF_POSTS}}`, and `{{IMAGE_1}}` through `{{IMAGE_10}}` placeholders. |
-| `OUTPUT_FOLDER_ID` | Drive folder where campaign folders are created. Each campaign folder contains the filled doc and all images. |
-| `TRIGGER_URL` | Substring in caption body that selects the IG-only template (absence selects IG+FB). |
-| `OUTPUT_DOC_PERMISSION` | `reader`, `commenter`, or `writer` — the permission set on the output doc. |
-| `PAIRING_TIMEOUT_MS` | How long to wait for the other half of a split zip+caption. Default: 120000. |
+The Docs API `insertInlineImage` takes a public URI. We upload each image to the campaign folder, grant public read permissions, and pass `https://drive.google.com/uc?id=<id>` to the Docs API.
 
 ---
 
 ## Build and run
 
 ```bash
-npm ci
-npm run build           # tsc → dist/
-npm start               # node dist/src/index.js
-npm run dev             # ts-node (no build step, for local dev)
-npm run auth:google     # one-time Google OAuth flow
-```
+# Build binary
+cd go && go build -o ../bin/squish-bot ./cmd/bot/
 
-Compiled output lands in `dist/src/` and `dist/scripts/` (not `dist/` directly, because `rootDir` is `./` to accommodate both `src/` and `scripts/`).
+# Run locally
+./bin/squish-bot
 
-**pm2:**
-```bash
-pm2 start ecosystem.config.js
-pm2 logs approve-to-squish   # watch for QR code on first run
+# Run auth helper
+cd go && go build -o ../bin/auth-google ./cmd/auth-google/
+./bin/auth-google
 ```
 
 ---
 
 ## What to watch out for when making changes
 
-- **`docs.ts` Phase B:** any change to how indices are calculated must account for the re-fetch loop. Do not try to batch all 10 slots into one update without careful offset tracking. Also: `deleteContentRange` operations cannot include the paragraph's trailing newline — `findBlockRange` subtracts 1 from `endIndex` to account for this.
-- **`docs.ts` deleteContentRange:** Google Docs API rejects ranges that include the final newline character at the end of a paragraph or table row. Always subtract 1 from `endIndex` when deleting a full block.
-- **`sqliteAuthState.ts`:** `saveCreds` is synchronous (better-sqlite3). Baileys expects it to return `void | Promise<void>`. Returning `void` is fine. Do not make it async without testing — async `saveCreds` with better-sqlite3 will not work.
-- **`client.ts` pairing buffer:** uses dual FIFO queues per JID (`pendingZips[]`, `pendingCaptions[]`). Multiple pairs can be in-flight simultaneously. Each queue item has its own expiry timer. For linked device connections, incoming JIDs use the `@lid` suffix, not `@s.whatsapp.net`.
-- **`client.ts` state machine:** the four states (`single`, `batch-idle`, `batch-confirming`, `processing`) must always transition correctly. Commands that change mode (`/batch`, `/single`) are blocked during `batch-confirming` and `processing`. `/cancel` resets to `batch-idle` (or stays `single`), never to `processing`.
-- **`client.ts` spooling:** batch zips are spooled to `data/batch-spool/`. If the process crashes, these files might leak. They are gitignored. Always use `cleanupSpooledZips` to avoid disk bloat.
-- **`client.ts` zip handling:** `countImagesInZip` (AdmZip) is wrapped in try/catch to handle corrupt files. Always validate before enqueuing or processing.
-- **Template placeholders:** `{{IMAGE_1}}` through `{{IMAGE_10}}`, `{{TITLE}}`, `{{CAPTION}}`, `{{HASHTAGS}}`, and `{{NUMBER_OF_POSTS}}` must be in the template as literal text. Image placeholders must each be in their own cleanly deletable block. If any placeholder is missing, `fillDoc` logs a warning and skips it — it will not throw. Missing image in the output doc is a template setup issue, not a code bug.
-- **Google API quotas:** `documents.get` is called once per slot in Phase B (up to 10 calls per run). At low volume this is fine. If throughput ever matters, switch to a single `documents.get` + batched updates with manually adjusted indices.
+- **`docs.go` Phase B:** any change to how indices are calculated must account for the re-fetch loop. When deleting a full block, the final newline character must be excluded (`endIndex - 1`), otherwise the Google Docs API will reject the request.
+- **LID and linked device JIDs:** whatsmeow parses JIDs into `types.JID` objects. Always use `.ToNonAD()` to normalise JIDs for state mapping, and check alternative addresses (e.g. `SenderAlt` or JID user + `@lid`) to verify allowed users.
+- **Go toolchain:** whatsmeow requires Go >= 1.25. Ensure the toolchain on the VPS is up-to-date. CGo (`gcc`) is required for building `go-sqlite3`.
+- **Zip processing:** zip extraction silently filters to root-level image files only, skipping macOS metadata or subdirectories.

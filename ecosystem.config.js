@@ -2,7 +2,8 @@ module.exports = {
   apps: [
     {
       name: 'approve-to-squish',
-      script: 'dist/src/index.js',
+      script: './bin/squish-bot',
+      interpreter: 'none',
       cwd: __dirname,
       env_file: '.env',
       restart_delay: 5000,

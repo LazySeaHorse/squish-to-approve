@@ -1,37 +1,31 @@
 # ── Stage 1: build ───────────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
-# Native deps needed to compile better-sqlite3 and other native addons
-RUN apk add --no-cache python3 make g++ gcc libc-dev
+# Install build dependencies for CGo (sqlite3 needs gcc/musl-dev)
+RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /app
 
-# Install ALL deps (including devDependencies for tsc)
-COPY package.json package-lock.json ./
-RUN npm ci
+# Copy dependency manifests
+COPY go/go.mod go/go.sum ./
+RUN go mod download
 
-# Copy source and compile
-COPY tsconfig.json ./
-COPY src/ ./src/
-RUN npm run build
+# Copy source code and build
+COPY go/ ./
+RUN CGO_ENABLED=1 GOOS=linux go build -o squish-bot ./cmd/bot/
 
 # ── Stage 2: production ───────────────────────────────────────────────────────
-FROM node:22-alpine AS production
-
-# Runtime native deps for better-sqlite3
-RUN apk add --no-cache python3 make g++ gcc libc-dev
+FROM alpine:latest AS production
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates
 
-# Install production deps only; rebuild native modules for this arch
-RUN npm ci --omit=dev && npm rebuild better-sqlite3
+# Copy compiled binary
+COPY --from=builder /app/squish-bot ./squish-bot
 
-# Copy compiled JS from builder stage
-COPY --from=builder /app/dist ./dist
-
-# The data directory (SQLite DB, Baileys session files) is mounted as a volume
+# The data directory (SQLite DB, whatsmeow session files) is mounted as a volume
 # so it survives container restarts / upgrades
 RUN mkdir -p /app/data
 
@@ -39,4 +33,4 @@ RUN mkdir -p /app/data
 RUN addgroup -S bot && adduser -S bot -G bot && chown -R bot:bot /app
 USER bot
 
-CMD ["node", "dist/src/index.js"]
+CMD ["./squish-bot"]

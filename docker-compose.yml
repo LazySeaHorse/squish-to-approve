@@ -12,7 +12,7 @@ services:
       - .env
 
     volumes:
-      # Persistent data: SQLite DB + Baileys session/auth files
+      # Persistent data: SQLite DB + whatsmeow session/auth files
       - bot_data:/app/data
 
     # Optional: resource limits to be a good citizen on the shared VPS
