@@ -113,6 +113,35 @@ sudo docker compose logs -f     # live logs
 sudo docker compose down        # stop and remove container (volume kept)
 ```
 
+### 8. Deploy with PM2 (Alternative to Docker)
+
+If you prefer to run the binary directly on the host system without Docker:
+
+1. **Build the binary**:
+   ```bash
+   cd go && go build -o ../bin/squish-bot ./cmd/bot/
+   ```
+2. **Run manually first** to pair your WhatsApp:
+   ```bash
+   cd .. && ./bin/squish-bot
+   # Enter the pairing code on your phone
+   # Press Ctrl+C once paired and connected
+   ```
+3. **Start PM2 process**:
+   ```bash
+   pm2 start ecosystem.config.js
+   ```
+4. **Save PM2 config** (ensures it restarts on reboot):
+   ```bash
+   pm2 save
+   ```
+
+To check logs or status:
+```bash
+pm2 logs approve-to-squish
+pm2 status
+```
+
 ---
 
 ## Usage
