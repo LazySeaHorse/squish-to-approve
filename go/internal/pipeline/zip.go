@@ -108,7 +108,17 @@ func ExtractAndValidateZip(zipPath, destDir string) ([]string, error) {
 		if err := extractFile(e.file, dest); err != nil {
 			return nil, fmt.Errorf("extract %s: %w", e.name, err)
 		}
-		paths[i] = dest
+
+		// Convert to WebP (80% quality) and delete original to save Drive space
+		webpName := strings.TrimSuffix(e.name, filepath.Ext(e.name)) + ".webp"
+		webpDest := filepath.Join(destDir, webpName)
+
+		if err := ConvertToWebP(dest, webpDest, 80); err != nil {
+			return nil, fmt.Errorf("convert %s to webp: %w", e.name, err)
+		}
+		_ = os.Remove(dest)
+
+		paths[i] = webpDest
 	}
 
 	return paths, nil

@@ -151,6 +151,9 @@ func ShareDoc(ctx context.Context, client *http.Client, docID, permission string
 
 func mimeForImage(name string) string {
 	ext := strings.ToLower(filepath.Ext(name))
+	if ext == ".webp" {
+		return "image/webp"
+	}
 	t := mime.TypeByExtension(ext)
 	if t == "" {
 		if ext == ".jpg" || ext == ".jpeg" {
