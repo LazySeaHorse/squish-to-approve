@@ -43,9 +43,9 @@ func main() {
 	}
 
 	authURL := cfg.AuthCodeURL("state", oauth2.AccessTypeOffline, oauth2.ApprovalForce)
-	fmt.Println("\n🔗 Open this URL in your browser to authorise:\n")
+	fmt.Printf("\n🔗 Open this URL in your browser to authorise:\n\n")
 	fmt.Println(authURL)
-	fmt.Println("\nWaiting for the OAuth callback on http://localhost:3000/callback ...\n")
+	fmt.Printf("\nWaiting for the OAuth callback on http://localhost:3000/callback ...\n\n")
 
 	codeCh := make(chan string, 1)
 
@@ -78,7 +78,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("\n✅ Success! Add this to your .env:\n")
+	fmt.Printf("\n✅ Success! Add this to your .env:\n\n")
 	fmt.Printf("GOOGLE_REFRESH_TOKEN=%s\n", token.RefreshToken)
 
 	// Also pretty-print the full token for reference

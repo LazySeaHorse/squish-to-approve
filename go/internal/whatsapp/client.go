@@ -85,6 +85,7 @@ type Client struct {
 	cfg        *config.Config
 	httpClient *http.Client
 	jidStates  sync.Map // map[string]*jidState
+	sendTextFn func(jid, text string)
 }
 
 // New creates and connects a whatsmeow client.
@@ -710,6 +711,10 @@ func (c *Client) processBatch(replyJID, stateKey string) {
 // ── Send ──────────────────────────────────────────────────────────────────────
 
 func (c *Client) sendText(jid, text string) {
+	if c.sendTextFn != nil {
+		c.sendTextFn(jid, text)
+		return
+	}
 	jidParsed, err := types.ParseJID(jid)
 	if err != nil {
 		slog.Error("sendText: invalid JID", "jid", jid, "err", err)
