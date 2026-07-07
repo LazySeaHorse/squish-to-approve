@@ -105,6 +105,9 @@ cd go && go build -o ../bin/squish-bot ./cmd/bot/
 # Run auth helper
 cd go && go build -o ../bin/auth-google ./cmd/auth-google/
 ./bin/auth-google
+
+# Run all tests
+cd go && go test ./...
 ```
 
 ---
