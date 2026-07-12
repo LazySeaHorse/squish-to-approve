@@ -178,7 +178,7 @@ func TestPipelineE2E(t *testing.T) {
 		TemplateIDIG:        "tmpl-ig",
 		TemplateIDIGFB:      "tmpl-ig-fb",
 		OutputFolderID:      "default-out-folder",
-		TriggerURL:          "sincerely.aiesec.lk",
+		TriggerURL:          "instagram.com/p/",
 		OutputDocPermission: "reader",
 	}
 
@@ -237,7 +237,7 @@ func TestPipelineE2E(t *testing.T) {
 		input := Input{
 			MsgID:       "msg-456",
 			ZipData:     zipData,
-			CaptionText: "Triggered Campaign\nLink: sincerely.aiesec.lk",
+			CaptionText: "Triggered Campaign\nLink: instagram.com/p/",
 		}
 
 		_, err := Run(context.Background(), cfg, client, input)

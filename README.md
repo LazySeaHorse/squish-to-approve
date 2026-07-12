@@ -61,8 +61,8 @@ The only difference between the two templates is the Platform field:
 ### 6. Fill in the rest of .env
 
 ```
-ALLOWED_JIDS=94721470618@s.whatsapp.net,48043604889668@lid   # your number or linked devices
-TRIGGER_URL=sincerely.aiesec.lk                             # substring that flips to IG-only template
+ALLOWED_JIDS=12025550199@s.whatsapp.net,12025550199@lid   # your number or linked devices
+TRIGGER_URL=instagram.com/p/                             # substring that flips to IG-only template
 ```
 
 ### 7. Deploy with Docker
