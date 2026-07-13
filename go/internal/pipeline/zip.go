@@ -21,8 +21,8 @@ var imageExts = map[string]bool{
 	".png":  true,
 }
 
-// Naming accepts either "name (N).ext" or "0*N.ext" — same as TS zip.ts.
-var nameRe = regexp.MustCompile(`(?i)^(?:.*\((\d+)\)|0*(\d+))\.(jpg|jpeg|png)$`)
+// nameRe extracts the last sequence of digits in the base filename (excluding extension).
+var nameRe = regexp.MustCompile(`(\d+)\D*$`)
 
 // ZipError is a typed validation error, matching the TS ZipValidationError.
 type ZipError struct {
@@ -64,18 +64,22 @@ func ExtractAndValidateZip(zipPath, destDir string) ([]string, error) {
 			continue
 		}
 
-		m := nameRe.FindStringSubmatch(name)
+		base := name[:len(name)-len(ext)]
+		m := nameRe.FindStringSubmatch(base)
 		if m == nil {
 			return nil, &ZipError{
 				Kind:    "wrong_naming",
-				Message: fmt.Sprintf("%q doesn't match expected naming (e.g. 1.jpg, \"dives (1).png\").", name),
+				Message: fmt.Sprintf("%q doesn't contain a slide number (e.g. 1.jpg, \"dives (1).png\", \"frame_028.png\").", name),
 			}
 		}
 		numStr := m[1]
-		if numStr == "" {
-			numStr = m[2]
+		n, err := strconv.Atoi(numStr)
+		if err != nil {
+			return nil, &ZipError{
+				Kind:    "wrong_naming",
+				Message: fmt.Sprintf("Slide number %q in %q is too large.", numStr, name),
+			}
 		}
-		n, _ := strconv.Atoi(numStr)
 		entries = append(entries, numbered{n: n, name: name, file: f})
 	}
 
@@ -86,13 +90,13 @@ func ExtractAndValidateZip(zipPath, destDir string) ([]string, error) {
 		return nil, &ZipError{Kind: "too_many", Message: fmt.Sprintf("%d images found; max is %d.", len(entries), maxImages)}
 	}
 
-	// Sort and validate consecutive 1..N
+	// Sort and validate unique numbers
 	sort.Slice(entries, func(i, j int) bool { return entries[i].n < entries[j].n })
-	for i, e := range entries {
-		if e.n != i+1 {
+	for i := 0; i < len(entries)-1; i++ {
+		if entries[i].n == entries[i+1].n {
 			return nil, &ZipError{
-				Kind:    "missing_numbers",
-				Message: fmt.Sprintf("Expected slide %d but found slide %d.", i+1, e.n),
+				Kind:    "wrong_naming",
+				Message: fmt.Sprintf("Duplicate slide number %d found in files %q and %q.", entries[i].n, entries[i].name, entries[i+1].name),
 			}
 		}
 	}

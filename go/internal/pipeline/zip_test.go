@@ -158,10 +158,55 @@ func TestExtractAndValidateZip(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects missing numbers in sequence", func(t *testing.T) {
+	t.Run("accepts non-consecutive and arbitrary numbers", func(t *testing.T) {
 		zipPath := makeTestZip(t, map[string][]byte{
-			"1.png": nil,
-			"3.png": nil,
+			"500.png": nil,
+			"1.png":   nil,
+			"300.png": nil,
+			"4.png":   nil,
+		})
+		destDir := t.TempDir()
+		files, err := ExtractAndValidateZip(zipPath, destDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) != 4 {
+			t.Fatalf("expected 4 files, got %d", len(files))
+		}
+		expected := []string{"1.jpg", "4.jpg", "300.jpg", "500.jpg"}
+		for i, name := range expected {
+			if filepath.Base(files[i]) != name {
+				t.Errorf("expected %s at index %d, got %s", name, i, filepath.Base(files[i]))
+			}
+		}
+	})
+
+	t.Run("accepts custom prefixes/suffixes and padding", func(t *testing.T) {
+		zipPath := makeTestZip(t, map[string][]byte{
+			"frame_028.png":   nil,
+			"frame_25.png":    nil,
+			"slide-300-b.png": nil,
+		})
+		destDir := t.TempDir()
+		files, err := ExtractAndValidateZip(zipPath, destDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) != 3 {
+			t.Fatalf("expected 3 files, got %d", len(files))
+		}
+		expected := []string{"frame_25.jpg", "frame_028.jpg", "slide-300-b.jpg"}
+		for i, name := range expected {
+			if filepath.Base(files[i]) != name {
+				t.Errorf("expected %s at index %d, got %s", name, i, filepath.Base(files[i]))
+			}
+		}
+	})
+
+	t.Run("rejects duplicate numbers", func(t *testing.T) {
+		zipPath := makeTestZip(t, map[string][]byte{
+			"frame_25.png": nil,
+			"image_25.png": nil,
 		})
 		destDir := t.TempDir()
 		_, err := ExtractAndValidateZip(zipPath, destDir)
@@ -169,8 +214,8 @@ func TestExtractAndValidateZip(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 		var zipErr *ZipError
-		if !errors.As(err, &zipErr) || zipErr.Kind != "missing_numbers" {
-			t.Errorf("expected missing_numbers ZipError, got %v", err)
+		if !errors.As(err, &zipErr) || zipErr.Kind != "wrong_naming" {
+			t.Errorf("expected wrong_naming ZipError, got %v", err)
 		}
 	})
 

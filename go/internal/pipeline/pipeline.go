@@ -66,7 +66,7 @@ func Run(ctx context.Context, cfg *config.Config, httpClient *http.Client, in In
 			case "too_many":
 				return Result{}, fmt.Errorf("⚠️ Max 10 images per carousel.")
 			case "wrong_naming", "missing_numbers":
-				return Result{}, fmt.Errorf("⚠️ Images should be named 1.jpg, 2.jpg, etc.")
+				return Result{}, fmt.Errorf("⚠️ Images should contain distinct numbers (e.g. 1.jpg, 2.jpg, frame_028.jpg).")
 			}
 		}
 		return Result{}, fmt.Errorf("⚠️ Could not read the zip: %v", err)
