@@ -14,6 +14,24 @@ type ParsedCaption struct {
 
 var hashtagRe = regexp.MustCompile(`#[\w]+`)
 
+var (
+	boldRe   = regexp.MustCompile(`(^|\s)\*\*?([^\s*](?:[^*]*?[^\s*])?)\*\*?([\s.,!?;:]|$)`)
+	italicRe = regexp.MustCompile(`(^|\s)_([^\s_](?:[^_]*?[^\s_])?)_([\s.,!?;:]|$)`)
+	strikeRe = regexp.MustCompile(`(^|\s)~~?([^\s~](?:[^~]*?[^\s~])?)~~?([\s.,!?;:]|$)`)
+	codeRe   = regexp.MustCompile("(^|\\s)`{1,3}([^\\s`](?:[^`]*?[^\\s`])?)`{1,3}([\\s.,!?;:]|$)")
+)
+
+// StripMarkdown removes WhatsApp/Markdown bold, italic, strikethrough, and code formatting.
+func StripMarkdown(s string) string {
+	for i := 0; i < 3; i++ {
+		s = boldRe.ReplaceAllString(s, "$1$2$3")
+		s = italicRe.ReplaceAllString(s, "$1$2$3")
+		s = strikeRe.ReplaceAllString(s, "$1$2$3")
+		s = codeRe.ReplaceAllString(s, "$1$2$3")
+	}
+	return s
+}
+
 // ParseCaption splits a raw caption into title, body, and deduplicated hashtags.
 // Mirrors parseCaption in src/pipeline/parseText.ts exactly.
 //
@@ -31,7 +49,11 @@ func ParseCaption(raw string) ParsedCaption {
 		hashtags := extractHashtags(raw)
 		// Remove hashtag tokens from the title
 		title = strings.TrimSpace(hashtagRe.ReplaceAllString(title, ""))
-		return ParsedCaption{Title: title, CaptionBody: "", Hashtags: hashtags}
+		return ParsedCaption{
+			Title:       StripMarkdown(title),
+			CaptionBody: "",
+			Hashtags:    hashtags,
+		}
 	}
 
 	title := strings.TrimSpace(raw[:idx])
@@ -51,7 +73,11 @@ func ParseCaption(raw string) ParsedCaption {
 	body = multiNLRe.ReplaceAllString(body, "\n\n")
 	body = strings.TrimSpace(body)
 
-	return ParsedCaption{Title: title, CaptionBody: body, Hashtags: hashtags}
+	return ParsedCaption{
+		Title:       StripMarkdown(title),
+		CaptionBody: StripMarkdown(body),
+		Hashtags:    hashtags,
+	}
 }
 
 func extractHashtags(text string) []string {
